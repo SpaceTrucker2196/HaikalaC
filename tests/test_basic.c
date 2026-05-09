@@ -230,6 +230,45 @@ static void test_weather_classifier_via_palette(void)
     ASSERT(s >= 0 && s <= 3);
 }
 
+static void test_no_emoji_bg_does_not_bleed_across_empty_cells(void)
+{
+    /* Regression: with bg colors set on adjacent cells separated by an
+     * empty one, the emitter must reset SGR before the empty cell so
+     * the bg doesn't extend through it as a horizontal bar. */
+    hk_grid *g = hk_grid_new(HK_SIZE_SMALL);  /* 15 wide × 7 tall */
+    ASSERT(g != NULL);
+    /* Place X at column 2 row 3, leave 3 empty, place Y at column 6.
+     * Both carry the same bg color. */
+    int row = 3;
+    hk_cell *cx = &g->cells[row * g->width + 2];
+    hk_cell *cy = &g->cells[row * g->width + 6];
+    snprintf(cx->glyph, HK_MAX_GLYPH_BYTES, "%s", "X");
+    cx->fg = (hk_rgb){0xff, 0xff, 0xff}; cx->has_fg = true;
+    cx->bg = (hk_rgb){0x40, 0x80, 0xc0}; cx->has_bg = true;
+    snprintf(cy->glyph, HK_MAX_GLYPH_BYTES, "%s", "Y");
+    cy->fg = (hk_rgb){0xff, 0xff, 0xff}; cy->has_fg = true;
+    cy->bg = (hk_rgb){0x40, 0x80, 0xc0}; cy->has_bg = true;
+
+    char buf[4096];
+    hk_grid_to_ansi(g, 0.0, NULL, NULL, buf, sizeof(buf));
+
+    /* The X must be followed by a reset (\x1b[0m) before any bare
+     * spaces, otherwise the bg will bleed across to Y. */
+    const char *p = strstr(buf, "X");
+    ASSERT(p != NULL);
+    /* Skip past the X. */
+    ++p;
+    ASSERT(*p == '\x1b');
+    /* Find the next non-space, non-escape character; it should be 'Y'
+     * (preceded somewhere by a fresh SGR). */
+    /* Easier: confirm the substring "X\x1b[0m" appears. */
+    ASSERT(strstr(buf, "X\x1b[0m") != NULL);
+    /* Confirm the substring "Y\x1b[0m" appears too (end-of-row reset). */
+    ASSERT(strstr(buf, "Y\x1b[0m") != NULL);
+
+    hk_grid_free(g);
+}
+
 static void test_render_with_fractal_runs(void)
 {
     const hk_haiku *h = hk_haiku_get("old_pond");
@@ -287,6 +326,7 @@ int main(void)
     test_hue_rotation_round_trip();
     test_render_with_fractal_runs();
     test_weather_classifier_via_palette();
+    test_no_emoji_bg_does_not_bleed_across_empty_cells();
 
     if (failures) {
         printf("FAILED: %d failures\n", failures);

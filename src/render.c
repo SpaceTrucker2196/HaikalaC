@@ -139,11 +139,22 @@ size_t hk_grid_to_ansi(const hk_grid *g,
     hue_cache cache;
     cache_clear(&cache);
 
+    /* `sgr_active` is true between an SGR-setting cell and the next
+     * reset. Empty cells in between MUST reset first, otherwise the
+     * previous cell's bg (when set, e.g. --no-emoji) bleeds across the
+     * gap as a horizontal bar of background color. */
     for (int y = 0; y < g->height; ++y) {
+        bool sgr_active = false;
         for (int x = 0; x < g->width; ++x) {
             const hk_cell *c = &g->cells[y * g->width + x];
             if (c->covered) continue;
             if (c->glyph[0] == '\0') {
+                if (sgr_active) {
+                    int r = append(buf, bufsize, pos, "\x1b[0m");
+                    if (r < 0) return pos;
+                    pos += (size_t)r;
+                    sgr_active = false;
+                }
                 int r = append(buf, bufsize, pos, " ");
                 if (r < 0) return pos;
                 pos += (size_t)r;
@@ -158,14 +169,18 @@ size_t hk_grid_to_ansi(const hk_grid *g,
             }
             size_t sgr = emit_sgr(buf, bufsize, pos, c, shift, &cache);
             pos += sgr;
+            sgr_active = true;
             int r = append(buf, bufsize, pos, c->glyph);
             if (r < 0) return pos;
             pos += (size_t)r;
         }
-        int r = append(buf, bufsize, pos, "\x1b[0m");
-        if (r > 0) pos += (size_t)r;
+        if (sgr_active) {
+            int r = append(buf, bufsize, pos, "\x1b[0m");
+            if (r < 0) return pos;
+            pos += (size_t)r;
+        }
         if (y < g->height - 1) {
-            r = append(buf, bufsize, pos, "\r\n");
+            int r = append(buf, bufsize, pos, "\r\n");
             if (r < 0) return pos;
             pos += (size_t)r;
         }
