@@ -37,7 +37,22 @@ C99 compiler should work.
 ./haikalac --animate --no-emoji                     # block/dingbat + bg tints
 
 ./haikalac --animate --fractal --ripple --spin --cycle --emanate
+
+./haikalac --weather                                # prompts for zip
+./haikalac --weather --zip 94027                    # explicit, skip prompt
 ```
+
+### Weather mode
+
+`--weather` fetches the current condition for the given postal code via
+`wttr.in` (no API key required) and builds a fractal palette from a
+4-season base ramp (spring/summer/autumn/winter, picked from the local
+clock) plus a condition modifier (clear brightens, cloudy desaturates,
+rain/storm shift hue + darken, snow brightens + desaturates, fog flattens).
+
+Network is delegated to `curl` via `popen` — keeps HaikalaC itself free
+of any C-level networking dependency. The zip is sanitized to
+alphanumeric + hyphens (≤ 16 chars) before being interpolated.
 
 `q`, `Esc`, or `Ctrl-C` exits the animation cleanly (alternate screen
 buffer is restored, raw mode is undone).

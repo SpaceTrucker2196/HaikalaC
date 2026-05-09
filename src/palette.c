@@ -413,3 +413,95 @@ bool hk_palette_from_haiku(const hk_haiku *h, hk_rgb out[HK_PALETTE_STOPS])
     resample_anchors(anchors, n_anchors, out, HK_PALETTE_STOPS);
     return true;
 }
+
+/* ---- weather-derived palettes ------------------------------------- */
+
+/* Four base season ramps used by the --weather mode. Distinct from the
+ * Python upstream's `PALETTES` dict (those map seasons → Rich color
+ * names for ring fg colors). These are 8-stop fractal-style ramps,
+ * dark→bright, designed to read as the *atmosphere* of each season:
+ *   spring: damp earth → green shoots → blossom
+ *   summer: deep teal water → bright sky → sunlit gold
+ *   autumn: charred bark → ember → harvest gold
+ *   winter: deep navy → ice blue → snow
+ *
+ * The condition modifier then nudges these in HLS space. */
+static const hk_rgb WEATHER_SEASONS[4][HK_PALETTE_STOPS] = {
+    /* SPRING */ {
+        HEX(0a1810), HEX(152e1a), HEX(2c5a30), HEX(64a850),
+        HEX(b0d878), HEX(ffd0e0), HEX(f6f8e8), HEX(ffffff),
+    },
+    /* SUMMER */ {
+        HEX(001020), HEX(003845), HEX(0a708a), HEX(3da6c0),
+        HEX(90d8e0), HEX(ffe888), HEX(fff0c0), HEX(ffffe8),
+    },
+    /* AUTUMN */ {
+        HEX(100804), HEX(2b1208), HEX(5e2c10), HEX(a8501c),
+        HEX(e8862a), HEX(ffc060), HEX(ffe098), HEX(fff5d8),
+    },
+    /* WINTER */ {
+        HEX(000814), HEX(0a1a30), HEX(264870), HEX(5c8ab0),
+        HEX(a8c8e0), HEX(e0eaf6), HEX(f0f8ff), HEX(ffffff),
+    },
+};
+
+/* Condition modifier in HLS deltas. Hue is in degrees, L/S in [-1, +1]. */
+typedef struct {
+    double dH; /* hue rotation, degrees */
+    double dL; /* lightness offset */
+    double dS; /* saturation scale offset (multiplicative bias toward 0) */
+} weather_mod;
+
+static weather_mod modifier_for(hk_weather_cond c)
+{
+    weather_mod m = {0.0, 0.0, 0.0};
+    switch (c) {
+    case HK_WEATHER_CLEAR:  m.dL =  0.10;                                  break;
+    case HK_WEATHER_CLOUDY: m.dL = -0.05; m.dS = -0.45;                    break;
+    case HK_WEATHER_RAIN:   m.dH = +18.0; m.dL = -0.05; m.dS = -0.30;      break;
+    case HK_WEATHER_SNOW:   m.dL =  0.20; m.dS = -0.30;                    break;
+    case HK_WEATHER_STORM:  m.dH = +25.0; m.dL = -0.18; m.dS = -0.40;      break;
+    case HK_WEATHER_FOG:    m.dL =  0.08; m.dS = -0.65;                    break;
+    case HK_WEATHER_UNKNOWN:
+    default: break;
+    }
+    return m;
+}
+
+static hk_rgb apply_mod(hk_rgb in, weather_mod m)
+{
+    double h, l, s;
+    rgb_to_hls(in.r / 255.0, in.g / 255.0, in.b / 255.0, &h, &l, &s);
+    h = fmod(h + m.dH / 360.0, 1.0);
+    if (h < 0) h += 1.0;
+    l += m.dL;
+    if (l < 0) l = 0;
+    if (l > 1) l = 1;
+    /* dS is additive bias; clamp to [0, 1]. Negative dS pushes toward grey. */
+    s += m.dS;
+    if (s < 0) s = 0;
+    if (s > 1) s = 1;
+    double r, g, b;
+    hls_to_rgb(h, l, s, &r, &g, &b);
+    hk_rgb out;
+    long ir = (long)(r * 255.0 + 0.5);
+    long ig = (long)(g * 255.0 + 0.5);
+    long ib = (long)(b * 255.0 + 0.5);
+    if (ir < 0) ir = 0; if (ir > 255) ir = 255;
+    if (ig < 0) ig = 0; if (ig > 255) ig = 255;
+    if (ib < 0) ib = 0; if (ib > 255) ib = 255;
+    out.r = (uint8_t)ir; out.g = (uint8_t)ig; out.b = (uint8_t)ib;
+    return out;
+}
+
+void hk_palette_from_weather(hk_season s, hk_weather_cond c,
+                             hk_rgb out[HK_PALETTE_STOPS])
+{
+    if (!out) return;
+    int si = (int)s;
+    if (si < 0 || si > 3) si = 0;
+    weather_mod m = modifier_for(c);
+    for (int i = 0; i < HK_PALETTE_STOPS; ++i) {
+        out[i] = apply_mod(WEATHER_SEASONS[si][i], m);
+    }
+}

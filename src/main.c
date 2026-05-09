@@ -43,6 +43,10 @@ static void usage(FILE *out)
         "  --emanate-period <s>  seconds per wave (default 5)\n"
         "  --no-vary-breath      one synchronized breath for all rings\n"
         "\n"
+        "Weather mode (forces --fractal; needs `curl` on PATH):\n"
+        "  --weather             fetch local weather, derive palette\n"
+        "  --zip <code>          zip / postal code (else prompts on stdin)\n"
+        "\n"
         "  -h, --help            show this help\n"
         "\n"
         "Press q or Ctrl-C in animation mode to exit.\n",
@@ -68,9 +72,27 @@ static void list_haiku(void)
     }
 }
 
+/* Read a single line from stdin into `out` (max len-1 bytes), strip
+ * trailing whitespace. Returns false on EOF or empty input. */
+static bool prompt_line(const char *prompt, char *out, size_t len)
+{
+    if (!out || len == 0) return false;
+    if (prompt) { fputs(prompt, stdout); fflush(stdout); }
+    if (!fgets(out, (int)len, stdin)) return false;
+    size_t n = strlen(out);
+    while (n > 0) {
+        unsigned char c = (unsigned char)out[n - 1];
+        if (c == '\n' || c == '\r' || c == ' ' || c == '\t') out[--n] = '\0';
+        else break;
+    }
+    return n > 0;
+}
+
 int main(int argc, char **argv)
 {
     const char *id = NULL;
+    const char *zip = NULL;
+    bool weather_mode = false;
     hk_options opt;
     hk_options_default(&opt);
 
@@ -94,6 +116,8 @@ int main(int argc, char **argv)
         if (strcmp(a, "--emanate")    == 0) { opt.emanate    = true; continue; }
         if (strcmp(a, "--no-emanate") == 0) { opt.emanate    = false; continue; }
         if (strcmp(a, "--no-vary-breath") == 0) { opt.vary_breath = false; continue; }
+        if (strcmp(a, "--weather") == 0) { weather_mode = true; continue; }
+        if (strcmp(a, "--zip") == 0 && i + 1 < argc) { zip = argv[++i]; continue; }
         if (strcmp(a, "--haiku") == 0 && i + 1 < argc) {
             id = argv[++i]; continue;
         }
@@ -165,5 +189,31 @@ int main(int argc, char **argv)
         size_t idx = (size_t)(time(NULL)) % hk_haiku_count;
         h = &hk_haiku_table[idx];
     }
+
+    /* Weather mode: prompt for zip if missing, fetch, build palette. */
+    if (weather_mode) {
+        char buf[64];
+        if (!zip) {
+            if (!prompt_line("Enter zip / postal code: ", buf, sizeof(buf))) {
+                fprintf(stderr, "haikalac: no zip provided\n");
+                return 2;
+            }
+            zip = buf;
+        }
+        hk_weather w;
+        if (!hk_weather_fetch(zip, &w)) {
+            fprintf(stderr,
+                "haikalac: weather fetch failed for %s "
+                "(needs `curl` on PATH and network access)\n", zip);
+            return 1;
+        }
+        printf("Weather for %s: %s — season=%s, condition=%s\n",
+               zip, w.raw_text,
+               hk_season_name(w.season), hk_weather_cond_name(w.condition));
+        opt.fractal = true;
+        opt.has_forced_palette = true;
+        hk_palette_from_weather(w.season, w.condition, opt.forced_palette);
+    }
+
     return hk_run(h, &opt);
 }

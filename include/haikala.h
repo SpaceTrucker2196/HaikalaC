@@ -103,6 +103,46 @@ const char *const *hk_text_glyphs_for(const char *token, size_t *out_n);
 int  hk_fold_for_haiku(const hk_haiku *h);
 bool hk_palette_from_haiku(const hk_haiku *h, hk_rgb out[HK_PALETTE_STOPS]);
 
+/* ---------- weather-derived palette --------------------------------- */
+
+typedef enum {
+    HK_SEASON_SPRING = 0,
+    HK_SEASON_SUMMER = 1,
+    HK_SEASON_AUTUMN = 2,
+    HK_SEASON_WINTER = 3,
+} hk_season;
+
+typedef enum {
+    HK_WEATHER_UNKNOWN = 0,
+    HK_WEATHER_CLEAR,
+    HK_WEATHER_CLOUDY,
+    HK_WEATHER_RAIN,
+    HK_WEATHER_SNOW,
+    HK_WEATHER_STORM,
+    HK_WEATHER_FOG,
+} hk_weather_cond;
+
+typedef struct {
+    hk_season       season;
+    hk_weather_cond condition;
+    char            raw_text[128]; /* condition string from API, for display */
+} hk_weather;
+
+hk_season hk_season_now(void); /* from local clock */
+
+/* Fetch weather for zip via `curl wttr.in/<zip>?format=%C`. Returns
+ * false on network/parse failure; the zip is sanitized (alphanumeric +
+ * hyphens, ≤ 16 chars) to keep the popen call safe. */
+bool hk_weather_fetch(const char *zip, hk_weather *out);
+
+const char *hk_weather_cond_name(hk_weather_cond c);
+const char *hk_season_name(hk_season s);
+
+/* Build an 8-stop palette from (season, condition). Uses one of four
+ * base season ramps and applies a small HLS mutation per condition. */
+void hk_palette_from_weather(hk_season s, hk_weather_cond c,
+                             hk_rgb out[HK_PALETTE_STOPS]);
+
 /* ---------- mandala spec -------------------------------------------- */
 
 typedef enum {
@@ -273,6 +313,12 @@ typedef struct {
     double emanate_period;
 
     bool   vary_breath;
+
+    /* Optional caller-supplied 8-stop palette. When `has_forced_palette`
+     * is true it overrides both `palette` (named) and the haiku-auto
+     * derivation — used by the `--weather` mode. */
+    hk_rgb forced_palette[HK_PALETTE_STOPS];
+    bool   has_forced_palette;
 } hk_options;
 
 void hk_options_default(hk_options *opt);

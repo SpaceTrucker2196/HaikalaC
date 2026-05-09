@@ -199,6 +199,37 @@ static void test_hue_rotation_round_trip(void)
     ASSERT(full.b <= 0x02);
 }
 
+static void test_weather_classifier_via_palette(void)
+{
+    /* Each season + condition pair must produce a valid 8-stop ramp.
+     * We don't hit the network — just exercise the palette generator. */
+    hk_rgb pal[HK_PALETTE_STOPS];
+    hk_season seasons[] = {HK_SEASON_SPRING, HK_SEASON_SUMMER,
+                           HK_SEASON_AUTUMN, HK_SEASON_WINTER};
+    hk_weather_cond conds[] = {
+        HK_WEATHER_CLEAR, HK_WEATHER_CLOUDY, HK_WEATHER_RAIN,
+        HK_WEATHER_SNOW, HK_WEATHER_STORM, HK_WEATHER_FOG,
+        HK_WEATHER_UNKNOWN,
+    };
+    for (size_t s = 0; s < sizeof(seasons)/sizeof(seasons[0]); ++s) {
+        for (size_t c = 0; c < sizeof(conds)/sizeof(conds[0]); ++c) {
+            memset(pal, 0xee, sizeof(pal));
+            hk_palette_from_weather(seasons[s], conds[c], pal);
+            /* Ramp must be monotonic non-decreasing in luminance — that's
+             * how we built the season anchors. */
+            double prev = -1.0;
+            for (int i = 0; i < HK_PALETTE_STOPS; ++i) {
+                double lum = 0.299*pal[i].r + 0.587*pal[i].g + 0.114*pal[i].b;
+                ASSERT(lum + 0.5 >= prev);
+                prev = lum;
+            }
+        }
+    }
+    /* Season-from-clock must be one of the four. */
+    int s = (int)hk_season_now();
+    ASSERT(s >= 0 && s <= 3);
+}
+
 static void test_render_with_fractal_runs(void)
 {
     const hk_haiku *h = hk_haiku_get("old_pond");
@@ -255,6 +286,7 @@ int main(void)
     test_named_palette_lookup();
     test_hue_rotation_round_trip();
     test_render_with_fractal_runs();
+    test_weather_classifier_via_palette();
 
     if (failures) {
         printf("FAILED: %d failures\n", failures);

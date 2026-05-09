@@ -49,16 +49,23 @@ void hk_options_default(hk_options *opt)
     opt->emanate_period  = 5.0;
 
     opt->vary_breath  = true;
+
+    opt->has_forced_palette = false;
+    /* forced_palette left zero-initialized; not consulted unless flag set */
 }
 
-/* Resolve fractal palette: explicit name → named; else auto (haiku
- * words) → derived; fall back to aurora. Writes into `out` (8 stops). */
+/* Resolve fractal palette: forced (e.g. --weather) > explicit name >
+ * auto (haiku words) > aurora fallback. Writes into `out`. */
 static void resolve_fractal_palette(const hk_haiku *h,
-                                    hk_palette_id requested,
+                                    const hk_options *opt,
                                     hk_rgb out[HK_PALETTE_STOPS])
 {
-    if (requested >= 0 && requested < HK_PAL_COUNT) {
-        const hk_rgb *named = hk_palette_named(requested);
+    if (opt->has_forced_palette) {
+        memcpy(out, opt->forced_palette, sizeof(hk_rgb) * HK_PALETTE_STOPS);
+        return;
+    }
+    if ((int)opt->palette >= 0 && opt->palette < HK_PAL_COUNT) {
+        const hk_rgb *named = hk_palette_named(opt->palette);
         memcpy(out, named, sizeof(hk_rgb) * HK_PALETTE_STOPS);
         return;
     }
@@ -158,7 +165,7 @@ int hk_run(const hk_haiku *h, const hk_options *opt)
     /* Resolve fractal palette if needed. */
     hk_rgb fractal_colors[HK_PALETTE_STOPS];
     if (opt->fractal) {
-        resolve_fractal_palette(h, opt->palette, fractal_colors);
+        resolve_fractal_palette(h, opt, fractal_colors);
     }
 
     /* Build a render-params bundle that mirrors the options. */
