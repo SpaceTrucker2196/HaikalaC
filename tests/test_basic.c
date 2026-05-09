@@ -230,6 +230,25 @@ static void test_weather_classifier_via_palette(void)
     ASSERT(s >= 0 && s <= 3);
 }
 
+static void test_sound_module_lifecycle(void)
+{
+    /* When closed, energy must be 0. Open is best-effort: if sox isn't
+     * installed (CI envs often), open returns false and we still
+     * expect a clean 0. */
+    ASSERT(hk_sound_energy() == 0.0);
+    bool ok = hk_sound_open();
+    if (!ok) {
+        /* No sox on PATH — that's fine. Energy still 0. */
+        ASSERT(hk_sound_energy() == 0.0);
+        return;
+    }
+    /* Sox is available: energy is in [0, 1]. */
+    double e = hk_sound_energy();
+    ASSERT(e >= 0.0 && e <= 1.0);
+    hk_sound_close();
+    ASSERT(hk_sound_energy() == 0.0);
+}
+
 static void test_size_max_fits_terminal(void)
 {
     /* For a sane terminal, the resulting body must fit:
@@ -357,6 +376,7 @@ int main(void)
     test_weather_classifier_via_palette();
     test_no_emoji_bg_does_not_bleed_across_empty_cells();
     test_size_max_fits_terminal();
+    test_sound_module_lifecycle();
 
     if (failures) {
         printf("FAILED: %d failures\n", failures);

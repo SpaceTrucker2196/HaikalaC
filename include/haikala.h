@@ -143,6 +143,16 @@ const char *hk_season_name(hk_season s);
 void hk_palette_from_weather(hk_season s, hk_weather_cond c,
                              hk_rgb out[HK_PALETTE_STOPS]);
 
+/* ---------- audio-reactive mode ------------------------------------ */
+
+/* Spawns a `sox` capture child reading the system default audio
+ * device. Returns false if sox isn't on PATH or the fd setup fails.
+ * Once open, hk_sound_energy() drains whatever audio bytes are
+ * available without blocking, and returns a smoothed RMS in [0, 1]. */
+bool   hk_sound_open(void);
+void   hk_sound_close(void);
+double hk_sound_energy(void);
+
 /* ---------- mandala spec -------------------------------------------- */
 
 typedef enum {
@@ -319,6 +329,9 @@ typedef struct {
     double emanate_period;
 
     bool   vary_breath;
+
+    bool   sound;          /* audio-reactive mode (needs sox) */
+    double sound_gain;     /* multiplier on energy, default 1.0 */
 
     /* Optional caller-supplied 8-stop palette. When `has_forced_palette`
      * is true it overrides both `palette` (named) and the haiku-auto

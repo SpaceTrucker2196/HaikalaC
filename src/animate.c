@@ -72,6 +72,9 @@ void hk_options_default(hk_options *opt)
 
     opt->vary_breath  = true;
 
+    opt->sound        = false;
+    opt->sound_gain   = 1.0;
+
     opt->has_forced_palette = false;
     /* forced_palette left zero-initialized; not consulted unless flag set */
 }
@@ -273,16 +276,42 @@ int hk_run(const hk_haiku *h, const hk_options *opt)
     emanate.period = opt->emanate_period;
     emanate.max_r  = (double)(spec.grid_radius + 1);
 
+    /* Sound mode: open sox capture before the loop. If sox isn't
+     * installed we print a one-line note and continue without effect. */
+    bool sound_active = false;
+    if (opt->sound) {
+        sound_active = hk_sound_open();
+        if (!sound_active) {
+            fprintf(stderr,
+                "haikalac: --sound requires `sox` on PATH; continuing "
+                "without audio reactivity\n");
+        }
+    }
+
     double start = monotonic_seconds();
+    double sound_phase = 0.0;
+    double prev_t      = 0.0;
 
     while (1) {
         if (hk_term_quit_pressed()) break;
         double t = monotonic_seconds() - start;
+        double dt = t - prev_t;
+        prev_t = t;
         rp.t = t;
         rp.breath = sin(2.0 * M_PI * t / period);
 
         double cycle_period = opt->cycle_period > 1.0 ? opt->cycle_period : 1.0;
         double hue_shift = opt->cycle ? (t / cycle_period) * 360.0 : 0.0;
+
+        /* Audio reactivity: drain the sox pipe and accumulate extra
+         * hue rotation proportional to recent loudness. A full-volume
+         * second rotates ~720°·gain by default (gain=1.0). */
+        if (sound_active) {
+            double e = hk_sound_energy() * opt->sound_gain;
+            if (e < 0.0) e = 0.0;
+            sound_phase += e * 720.0 * dt;
+            hue_shift += sound_phase;
+        }
 
         emanate.t = t;
         compose_frame(buf, bufsize, backdrop, &spec, h, mandala, canvas,
@@ -295,6 +324,7 @@ int hk_run(const hk_haiku *h, const hk_options *opt)
         sleep_for(frame_interval);
     }
 
+    if (sound_active) hk_sound_close();
     free(buf);
     hk_grid_free(backdrop);
     hk_grid_free(mandala);

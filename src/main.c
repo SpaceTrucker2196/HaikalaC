@@ -48,6 +48,10 @@ static void usage(FILE *out)
         "  --weather             fetch local weather, derive palette\n"
         "  --zip <code>          zip / postal code (else prompts on stdin)\n"
         "\n"
+        "Sound mode (audio-reactive hue rotation; needs `sox` on PATH):\n"
+        "  --sound               drive hue rotation from microphone level\n"
+        "  --sound-gain <n>      multiplier on energy (default 1.0)\n"
+        "\n"
         "  -h, --help            show this help\n"
         "\n"
         "Press q or Ctrl-C in animation mode to exit.\n",
@@ -119,6 +123,13 @@ int main(int argc, char **argv)
         if (strcmp(a, "--no-vary-breath") == 0) { opt.vary_breath = false; continue; }
         if (strcmp(a, "--weather") == 0) { weather_mode = true; continue; }
         if (strcmp(a, "--zip") == 0 && i + 1 < argc) { zip = argv[++i]; continue; }
+        if (strcmp(a, "--sound") == 0)    { opt.sound = true; continue; }
+        if (strcmp(a, "--no-sound") == 0) { opt.sound = false; continue; }
+        if (strcmp(a, "--sound-gain") == 0 && i + 1 < argc) {
+            opt.sound_gain = atof(argv[++i]);
+            if (opt.sound_gain < 0) opt.sound_gain = 0;
+            continue;
+        }
         if (strcmp(a, "--haiku") == 0 && i + 1 < argc) {
             id = argv[++i]; continue;
         }

@@ -54,6 +54,25 @@ Network is delegated to `curl` via `popen` — keeps HaikalaC itself free
 of any C-level networking dependency. The zip is sanitized to
 alphanumeric + hyphens (≤ 16 chars) before being interpolated.
 
+### Sound mode
+
+`--sound` makes the colors react to your microphone. Audio capture is
+delegated to `sox` (raw 16-bit signed mono PCM @ 22.05 kHz over a
+non-blocking pipe). Each frame, HaikalaC drains whatever bytes are
+buffered, computes RMS amplitude, smooths it with an exponential
+moving average, and adds a hue rotation proportional to the level —
+louder = faster color rotation, with a slow ringing decay so beats
+trail visually.
+
+Install sox if missing:
+- macOS:   `brew install sox`
+- Debian:  `apt install sox`
+- Fedora:  `dnf install sox`
+
+Without sox, `--sound` prints a single-line note and continues without
+audio reactivity. `--sound-gain <n>` (default 1.0) multiplies the
+energy if the response is too subtle or too aggressive for the room.
+
 `q`, `Esc`, or `Ctrl-C` exits the animation cleanly (alternate screen
 buffer is restored, raw mode is undone).
 
