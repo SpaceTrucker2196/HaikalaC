@@ -189,6 +189,12 @@ typedef enum {
     HK_SIZE_HUGE   = 20,
 } hk_size;
 
+/* Compute the largest mandala radius that fits in (term_width, term_height)
+ * after reserving rows for the haiku header. Capped to a practical max
+ * to keep the geometry coherent on very large displays. Returns at
+ * least HK_SIZE_SMALL even on very small terminals. */
+int hk_size_max_for_terminal(int term_width, int term_height);
+
 bool hk_haiku_to_spec(
     const hk_haiku *h,
     int    fold,

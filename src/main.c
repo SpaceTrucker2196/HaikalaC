@@ -21,7 +21,8 @@ static void usage(FILE *out)
         "  --list                list available haiku and exit\n"
         "\n"
         "Geometry & timing:\n"
-        "  --size <s>            small | medium | large | huge (default huge)\n"
+        "  --size <s>            small | medium | large | huge | max\n"
+        "                          (default huge; max fits the current terminal)\n"
         "  --fold <n>            auto | 4 | 6 | 8 | 10 | 12 | 14 | 16\n"
         "  --bpm <n>             breaths per minute (default 6)\n"
         "  --fps <n>             frames per second (default 24)\n"
@@ -122,8 +123,20 @@ int main(int argc, char **argv)
             id = argv[++i]; continue;
         }
         if (strcmp(a, "--size") == 0 && i + 1 < argc) {
-            int r = parse_size(argv[++i]);
-            if (r < 0) { fprintf(stderr, "haikalac: bad size %s\n", argv[i]); return 2; }
+            const char *v = argv[++i];
+            if (strcmp(v, "max") == 0) {
+                hk_term_size ts;
+                if (hk_term_size_get(&ts)) {
+                    opt.grid_radius =
+                        hk_size_max_for_terminal(ts.width, ts.height);
+                } else {
+                    /* No tty / can't query: fall back to huge. */
+                    opt.grid_radius = HK_SIZE_HUGE;
+                }
+                continue;
+            }
+            int r = parse_size(v);
+            if (r < 0) { fprintf(stderr, "haikalac: bad size %s\n", v); return 2; }
             opt.grid_radius = r; continue;
         }
         if (strcmp(a, "--fold") == 0 && i + 1 < argc) {

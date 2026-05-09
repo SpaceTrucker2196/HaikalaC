@@ -230,6 +230,35 @@ static void test_weather_classifier_via_palette(void)
     ASSERT(s >= 0 && s <= 3);
 }
 
+static void test_size_max_fits_terminal(void)
+{
+    /* For a sane terminal, the resulting body must fit:
+     *   width  4r+1 ≤ term_width
+     *   height 2r+1 ≤ term_height - header_overhead
+     */
+    int cases[][2] = {
+        { 80,  24}, /* common 80x24 */
+        {120,  40}, /* roomy laptop */
+        {200,  60}, /* big monitor */
+        { 30,  10}, /* tiny */
+        { 25,   8}, /* below floor — should still return >= small */
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        int w = cases[i][0], h = cases[i][1];
+        int r = hk_size_max_for_terminal(w, h);
+        ASSERT(r >= HK_SIZE_SMALL);
+        if (w >= 30 && h >= 16) {
+            int body_w = 4 * r + 1;
+            int body_h = 2 * r + 1;
+            ASSERT(body_w <= w);
+            ASSERT(body_h <= h - 2);  /* allow some header overhead */
+        }
+    }
+    /* On an enormous terminal we should still cap. */
+    int huge_r = hk_size_max_for_terminal(500, 200);
+    ASSERT(huge_r <= 40);
+}
+
 static void test_no_emoji_bg_does_not_bleed_across_empty_cells(void)
 {
     /* Regression: with bg colors set on adjacent cells separated by an
@@ -327,6 +356,7 @@ int main(void)
     test_render_with_fractal_runs();
     test_weather_classifier_via_palette();
     test_no_emoji_bg_does_not_bleed_across_empty_cells();
+    test_size_max_fits_terminal();
 
     if (failures) {
         printf("FAILED: %d failures\n", failures);

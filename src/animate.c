@@ -22,6 +22,28 @@
 #define M_PI 3.14159265358979323846
 #endif
 
+/* Layout overhead: header is 5 visible rows (3 lines + spacer + author)
+ * plus 2 padding rows above and 1 below — keep in sync with the composer
+ * below where the mandala stamp position is computed. */
+#define HK_HEADER_OVERHEAD 8
+#define HK_RADIUS_HARD_CAP 40
+
+int hk_size_max_for_terminal(int term_width, int term_height)
+{
+    if (term_width < 30 || term_height < HK_HEADER_OVERHEAD + 5) {
+        return HK_SIZE_SMALL;
+    }
+    /* Mandala body is (2r+1) rows tall, (4r+1) cells wide. Solve for r
+     * so the body fits within (term_h - header_overhead) rows and
+     * term_w columns. */
+    int rh = (term_height - HK_HEADER_OVERHEAD - 1) / 2;
+    int rw = (term_width - 1) / 4;
+    int r  = (rh < rw) ? rh : rw;
+    if (r < HK_SIZE_SMALL)        r = HK_SIZE_SMALL;
+    if (r > HK_RADIUS_HARD_CAP)   r = HK_RADIUS_HARD_CAP;
+    return r;
+}
+
 void hk_options_default(hk_options *opt)
 {
     if (!opt) return;
