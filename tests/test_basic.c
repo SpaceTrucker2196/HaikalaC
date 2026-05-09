@@ -50,16 +50,23 @@ static void test_is_emoji_and_wide(void)
     ASSERT(hk_is_wide("·")   == false);
 }
 
+static void render_at(const hk_spec *spec, double breath, hk_grid *g)
+{
+    hk_render_params rp;
+    hk_render_params_default(&rp);
+    rp.breath = breath;
+    hk_render_spec(spec, &rp, g);
+}
+
 static void test_haiku_to_spec_basic(void)
 {
     const hk_haiku *h = hk_haiku_get("old_pond");
     ASSERT(h != NULL);
     hk_spec spec;
-    bool ok = hk_haiku_to_spec(h, 8, HK_SIZE_MEDIUM, &spec);
+    bool ok = hk_haiku_to_spec(h, 8, HK_SIZE_MEDIUM, false, &spec);
     ASSERT(ok);
     ASSERT(spec.fold == 8);
     ASSERT(spec.grid_radius == HK_SIZE_MEDIUM);
-    /* lotus throne + content rings == 1 + (n_tokens - 1) */
     ASSERT(spec.n_rings == h->n_tokens);
     ASSERT(spec.center_glyph[0] != '\0');
 }
@@ -68,22 +75,38 @@ static void test_haiku_to_spec_rejects_invalid_fold(void)
 {
     const hk_haiku *h = hk_haiku_get("old_pond");
     hk_spec spec;
-    ASSERT(!hk_haiku_to_spec(h, 3, HK_SIZE_MEDIUM, &spec));   /* odd */
-    ASSERT(!hk_haiku_to_spec(h, 18, HK_SIZE_MEDIUM, &spec));  /* > 16 */
-    ASSERT(!hk_haiku_to_spec(h, 8, 1, &spec));                /* radius too small */
+    ASSERT(!hk_haiku_to_spec(h, 3, HK_SIZE_MEDIUM, false, &spec));
+    ASSERT(!hk_haiku_to_spec(h, 18, HK_SIZE_MEDIUM, false, &spec));
+    ASSERT(!hk_haiku_to_spec(h, 8, 1, false, &spec));
+}
+
+static void test_no_emoji_strips_emoji(void)
+{
+    const hk_haiku *h = hk_haiku_get("old_pond");
+    hk_spec spec;
+    ASSERT(hk_haiku_to_spec(h, 8, HK_SIZE_MEDIUM, true, &spec));
+    ASSERT(!hk_is_emoji(spec.center_glyph));
+    for (size_t i = 0; i < spec.n_rings; ++i) {
+        for (size_t j = 0; j < spec.rings[i].n_glyphs; ++j) {
+            ASSERT(!hk_is_emoji(spec.rings[i].glyphs[j]));
+        }
+    }
+    /* In no-emoji mode every ring carries a bg color. */
+    for (size_t i = 0; i < spec.n_rings; ++i) {
+        ASSERT(spec.rings[i].has_bg);
+    }
 }
 
 static void test_render_centers_bindu(void)
 {
     const hk_haiku *h = hk_haiku_get("old_pond");
     hk_spec spec;
-    ASSERT(hk_haiku_to_spec(h, 8, HK_SIZE_MEDIUM, &spec));
+    ASSERT(hk_haiku_to_spec(h, 8, HK_SIZE_MEDIUM, false, &spec));
     hk_grid *g = hk_grid_new(HK_SIZE_MEDIUM);
     ASSERT(g != NULL);
-    hk_render_spec(&spec, 0.0, g);
+    render_at(&spec, 0.0, g);
     int cy = g->height / 2, cx = g->width / 2;
     ASSERT(g->cells[cy * g->width + cx].glyph[0] != '\0');
-    /* Center color should be set. */
     ASSERT(g->cells[cy * g->width + cx].has_fg == true);
     hk_grid_free(g);
 }
@@ -93,14 +116,14 @@ static void test_render_for_every_haiku(void)
     for (size_t i = 0; i < hk_haiku_count; ++i) {
         const hk_haiku *h = &hk_haiku_table[i];
         hk_spec spec;
-        if (!hk_haiku_to_spec(h, 8, HK_SIZE_MEDIUM, &spec)) {
+        if (!hk_haiku_to_spec(h, 8, HK_SIZE_MEDIUM, false, &spec)) {
             fprintf(stderr, "FAIL: spec build for %s\n", h->id);
             ++failures;
             continue;
         }
         hk_grid *g = hk_grid_new(HK_SIZE_MEDIUM);
         if (!g) { ++failures; continue; }
-        hk_render_spec(&spec, 0.0, g);
+        render_at(&spec, 0.0, g);
         int cy = g->height / 2, cx = g->width / 2;
         if (g->cells[cy * g->width + cx].glyph[0] == '\0') {
             fprintf(stderr, "FAIL: %s has empty bindu\n", h->id);
@@ -114,22 +137,86 @@ static void test_breath_modulates_glyph_count(void)
 {
     const hk_haiku *h = hk_haiku_get("old_pond");
     hk_spec spec;
-    ASSERT(hk_haiku_to_spec(h, 8, HK_SIZE_MEDIUM, &spec));
+    ASSERT(hk_haiku_to_spec(h, 8, HK_SIZE_MEDIUM, false, &spec));
     hk_grid *g = hk_grid_new(HK_SIZE_MEDIUM);
     ASSERT(g != NULL);
 
     int counts[3] = {0, 0, 0};
     double breaths[3] = {-1.0, 0.0, 1.0};
     for (int b = 0; b < 3; ++b) {
-        hk_render_spec(&spec, breaths[b], g);
+        render_at(&spec, breaths[b], g);
         int n = 0;
         for (int i = 0; i < g->width * g->height; ++i) {
             if (g->cells[i].glyph[0] != '\0' && !g->cells[i].covered) ++n;
         }
         counts[b] = n;
     }
-    /* Inhale should not place fewer glyphs than exhale. */
     ASSERT(counts[2] >= counts[0]);
+    hk_grid_free(g);
+}
+
+static void test_fold_for_haiku_in_range(void)
+{
+    for (size_t i = 0; i < hk_haiku_count; ++i) {
+        int f = hk_fold_for_haiku(&hk_haiku_table[i]);
+        ASSERT(f >= 4 && f <= 16);
+        ASSERT(f % 2 == 0);
+    }
+}
+
+static void test_palette_from_haiku(void)
+{
+    const hk_haiku *h = hk_haiku_get("old_pond");
+    hk_rgb pal[HK_PALETTE_STOPS];
+    ASSERT(hk_palette_from_haiku(h, pal));
+    /* Should be monotonic ascending in luminance. */
+    double prev = -1.0;
+    for (int i = 0; i < HK_PALETTE_STOPS; ++i) {
+        double lum = 0.299 * pal[i].r + 0.587 * pal[i].g + 0.114 * pal[i].b;
+        ASSERT(lum + 1e-6 >= prev);
+        prev = lum;
+    }
+}
+
+static void test_named_palette_lookup(void)
+{
+    ASSERT(hk_palette_id_from_name("aurora") == HK_PAL_AURORA);
+    ASSERT(hk_palette_id_from_name("ocean")  == HK_PAL_OCEAN);
+    /* unknown name → < 0 (cast to int because enum may be unsigned). */
+    ASSERT((int)hk_palette_id_from_name("xyzzy") < 0);
+    const hk_rgb *p = hk_palette_named(HK_PAL_AURORA);
+    ASSERT(p != NULL);
+}
+
+static void test_hue_rotation_round_trip(void)
+{
+    hk_rgb red = {0xff, 0x00, 0x00};
+    hk_rgb same = hk_rotate_hue(red, 0.0);
+    ASSERT(same.r == 0xff && same.g == 0x00 && same.b == 0x00);
+    hk_rgb full = hk_rotate_hue(red, 360.0);
+    /* Allow tiny rounding. */
+    ASSERT(full.r >= 0xfd);
+    ASSERT(full.b <= 0x02);
+}
+
+static void test_render_with_fractal_runs(void)
+{
+    const hk_haiku *h = hk_haiku_get("old_pond");
+    hk_spec spec;
+    ASSERT(hk_haiku_to_spec(h, 8, HK_SIZE_MEDIUM, false, &spec));
+    hk_grid *g = hk_grid_new(HK_SIZE_MEDIUM);
+    ASSERT(g != NULL);
+    hk_render_params rp;
+    hk_render_params_default(&rp);
+    rp.fractal = true;
+    rp.fractal_colors = hk_palette_named(HK_PAL_OCEAN);
+    rp.spin = true;
+    rp.ripple = true;
+    rp.vary_breath = true;
+    rp.t = 1.5;
+    hk_render_spec(&spec, &rp, g);
+    int cy = g->height / 2, cx = g->width / 2;
+    ASSERT(g->cells[cy * g->width + cx].glyph[0] != '\0');
     hk_grid_free(g);
 }
 
@@ -158,10 +245,16 @@ int main(void)
     test_is_emoji_and_wide();
     test_haiku_to_spec_basic();
     test_haiku_to_spec_rejects_invalid_fold();
+    test_no_emoji_strips_emoji();
     test_render_centers_bindu();
     test_render_for_every_haiku();
     test_breath_modulates_glyph_count();
     test_backdrop_dimensions();
+    test_fold_for_haiku_in_range();
+    test_palette_from_haiku();
+    test_named_palette_lookup();
+    test_hue_rotation_round_trip();
+    test_render_with_fractal_runs();
 
     if (failures) {
         printf("FAILED: %d failures\n", failures);

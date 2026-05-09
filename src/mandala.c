@@ -171,7 +171,8 @@ static double shape_radius(hk_shape shape, double R, int fold, double theta_loca
 
 static bool place(hk_grid *g, int x, int y,
                   const char *glyph, hk_rgb color, uint8_t style,
-                  bool has_color)
+                  bool has_color,
+                  const hk_rgb *bg, bool has_bg)
 {
     if (y < 0 || y >= g->height) return false;
     if (x < 0 || x >= g->width)  return false;
@@ -186,6 +187,10 @@ static bool place(hk_grid *g, int x, int y,
     if (has_color) {
         cell->fg = color;
         cell->has_fg = true;
+    }
+    if (has_bg && bg) {
+        cell->bg = *bg;
+        cell->has_bg = true;
     }
     cell->style = style;
     cell->is_static = false;
@@ -274,35 +279,178 @@ static int selected_indices(int n, double density, int *out, int max_out)
     return m;
 }
 
+/* ---- per-ring breath / spin --------------------------------------- */
+
+static double ring_breath(double breath_global, int ring_idx, int n_rings,
+                          double t, double breath_period, bool vary)
+{
+    if (!vary || breath_period <= 0) return breath_global;
+    int span = n_rings > 1 ? (n_rings - 1) : 1;
+    double speed = 1.0 + 0.10 * (1.0 - 2.0 * (double)ring_idx / (double)span);
+    double phase = 0.45 * (double)ring_idx;
+    return sin(2.0 * M_PI * t * speed / breath_period + phase);
+}
+
+#define SPIN_RING_FALLOFF 0.32
+#define SPIN_FIELD_FRACTION 0.35
+
+static double spin_speed_for_ring(int ring_idx)
+{
+    double sign = (ring_idx % 2 == 1) ? -1.0 : 1.0;
+    double mag = 1.0;
+    for (int i = 0; i < ring_idx; ++i) mag *= (1.0 - SPIN_RING_FALLOFF);
+    return sign * mag;
+}
+
+/* ---- ripple -------------------------------------------------------- */
+
+#define RIPPLE_COUNT 2
+static const char RIPPLE_GLYPH[] = "◌";
+static const hk_rgb RIPPLE_COLOR = {0x9a, 0xd8, 0xff};
+
+static void paint_ripple(hk_grid *g, int grid_radius, int fold,
+                         double t, double ripple_period)
+{
+    int width = g->width, height = g->height;
+    int cx = width / 2, cy = height / 2;
+    double base_phase = fmod(t / ripple_period, 1.0);
+    if (base_phase < 0) base_phase += 1.0;
+    for (int k = 0; k < RIPPLE_COUNT; ++k) {
+        double phase = fmod(base_phase + (double)k / (double)RIPPLE_COUNT, 1.0);
+        double r_eff = phase * (grid_radius - 0.5);
+        if (r_eff < 0.5) continue;
+        uint8_t style = (phase < 0.85) ? HK_STYLE_NONE : HK_STYLE_DIM;
+        int n = positions_per_sector(r_eff, fold);
+        if (n < 1) n = 1;
+        for (int sector = 0; sector < fold; ++sector) {
+            for (int j = 0; j < n; ++j) {
+                double theta = 2.0 * M_PI *
+                               (double)(sector * n + j) /
+                               (double)(fold * n);
+                int x = (int)floor(cx + r_eff * cos(theta) * 2.0 + 0.5);
+                int y = (int)floor(cy + r_eff * sin(theta)       + 0.5);
+                place(g, x, y, RIPPLE_GLYPH, RIPPLE_COLOR, style,
+                      true, NULL, false);
+            }
+        }
+    }
+}
+
+/* ---- fractal field (Julia set with dihedral folding) -------------- */
+
+static const char *FRACTAL_GLYPHS[] = {
+    " ", " ", "·", "˙", "░", "░", "▒", "▓",
+};
+#define FRACTAL_N 8
+#define FRACTAL_MAX_ITER (FRACTAL_N - 1)
+
+static void apply_fractal_field(hk_grid *g, int grid_radius, int fold,
+                                double t, const hk_rgb colors[FRACTAL_N],
+                                double spin_angle)
+{
+    if (!g || !colors) return;
+    int width = g->width, height = g->height;
+    int cx = width / 2, cy = height / 2;
+    double edge = grid_radius + 0.5;
+    double scale = 1.5 / (grid_radius < 1 ? 1.0 : (double)grid_radius);
+    double drift = 0.05 * t;
+    double cre = 0.7885 * cos(drift);
+    double cim = 0.7885 * sin(drift);
+    double sector = 2.0 * M_PI / (fold > 0 ? fold : 1);
+    double half = sector * 0.5;
+
+    for (int gy = 0; gy < height; ++gy) {
+        for (int gx = 0; gx < width; ++gx) {
+            hk_cell *c = &g->cells[gy * width + gx];
+            if (c->covered) continue;
+            double rx = (gx - cx) / 2.0;
+            double ry = (double)(gy - cy);
+            double r = sqrt(rx * rx + ry * ry);
+            if (r > edge) continue;
+            double theta = fmod(atan2(ry, rx) - spin_angle, sector);
+            if (theta < 0) theta += sector;
+            if (theta > half) theta = sector - theta;
+            double zr = r * cos(theta) * scale;
+            double zi = r * sin(theta) * scale;
+            int i = 0;
+            while (i < FRACTAL_MAX_ITER && (zr * zr + zi * zi) < 4.0) {
+                double new_zr = zr * zr - zi * zi + cre;
+                double new_zi = 2.0 * zr * zi + cim;
+                zr = new_zr; zi = new_zi;
+                ++i;
+            }
+            hk_rgb fill = colors[i];
+            if (c->glyph[0] == '\0') {
+                const char *ch = FRACTAL_GLYPHS[i];
+                if (ch[0] == ' ' && ch[1] == '\0') continue;
+                snprintf(c->glyph, HK_MAX_GLYPH_BYTES, "%s", ch);
+                c->fg = fill;
+                c->has_fg = true;
+                c->style = HK_STYLE_NONE;
+            } else {
+                /* Existing ring/center cell: recolor fg, keep bg/style. */
+                c->fg = fill;
+                c->has_fg = true;
+            }
+        }
+    }
+}
+
 /* ---- main render --------------------------------------------------- */
 
-void hk_render_spec(const hk_spec *spec, double breath, hk_grid *g)
+void hk_render_params_default(hk_render_params *p)
+{
+    if (!p) return;
+    p->t = 0.0;
+    p->breath = 0.0;
+    p->breath_period = 10.0;
+    p->vary_breath = false;
+    p->ripple = false;
+    p->ripple_period = 4.0;
+    p->spin = false;
+    p->spin_period = 30.0;
+    p->fractal = false;
+    p->fractal_colors = NULL;
+}
+
+void hk_render_spec(const hk_spec *spec, const hk_render_params *params,
+                    hk_grid *g)
 {
     if (!spec || !g) return;
+    hk_render_params local;
+    if (!params) { hk_render_params_default(&local); params = &local; }
     hk_grid_clear(g);
 
     int width = g->width, height = g->height;
     int cx = width / 2, cy = height / 2;
+    double t = params->t;
+    int n_rings = (int)spec->n_rings;
 
-    double radius_mod = 1.0 + 0.13 * breath;
-    double density_mod = 1.0 + 0.18 * breath;
-
-    uint8_t ring_style = HK_STYLE_NONE;
-    if (breath < -0.4) ring_style = HK_STYLE_DIM;
-    else if (breath > 0.4) ring_style = HK_STYLE_BOLD;
-
+    /* Center: uses the global breath only. */
     uint8_t center_style = HK_STYLE_NONE;
-    if (breath > 0.5) center_style = HK_STYLE_BOLD;
-    else if (breath < -0.5) center_style = HK_STYLE_DIM;
-
-    /* Center bindu. */
+    if (params->breath > 0.5) center_style = HK_STYLE_BOLD;
+    else if (params->breath < -0.5) center_style = HK_STYLE_DIM;
     place(g, cx, cy, spec->center_glyph, spec->center_color,
-          center_style, true);
+          center_style, true, NULL, false);
+
+    double base_spin = 0.0;
+    if (params->spin && params->spin_period > 0) {
+        base_spin = 2.0 * M_PI * t / params->spin_period;
+    }
 
     int sel_buf[256];
 
-    for (size_t ri = 0; ri < spec->n_rings; ++ri) {
+    for (int ri = 0; ri < n_rings; ++ri) {
         const hk_ring *ring = &spec->rings[ri];
+        double rb = ring_breath(params->breath, ri, n_rings,
+                                t, params->breath_period,
+                                params->vary_breath);
+        double radius_mod = 1.0 + 0.13 * rb;
+        double density_mod = 1.0 + 0.18 * rb;
+        uint8_t ring_style = HK_STYLE_NONE;
+        if (rb < -0.4) ring_style = HK_STYLE_DIM;
+        else if (rb > 0.4) ring_style = HK_STYLE_BOLD;
+
         double r_eff = ring->radius * radius_mod;
         if (r_eff < 0.5) continue;
         int n = positions_per_sector(r_eff, spec->fold);
@@ -312,24 +460,41 @@ void hk_render_spec(const hk_spec *spec, double breath, hk_grid *g)
         if (density_eff > 1.0)  density_eff = 1.0;
         int m = selected_indices(n, density_eff, sel_buf,
                                  (int)(sizeof(sel_buf)/sizeof(sel_buf[0])));
+        double ring_spin = base_spin * spin_speed_for_ring(ri);
 
         for (int sector = 0; sector < spec->fold; ++sector) {
             for (int j = 0; j < m; ++j) {
                 int k = sel_buf[j];
                 double theta = 2.0 * M_PI *
                                (double)(sector * n + k) /
-                               (double)(spec->fold * n) + ring->phase;
+                               (double)(spec->fold * n)
+                               + ring->phase + ring_spin;
                 double r_at = shape_radius(ring->shape, r_eff, spec->fold,
-                                           theta - ring->phase);
+                                           theta - ring->phase - ring_spin);
                 int x = (int)floor(cx + r_at * cos(theta) * 2.0 + 0.5);
                 int y = (int)floor(cy + r_at * sin(theta)       + 0.5);
                 const char *gly = ring->glyphs[(size_t)k % ring->n_glyphs];
-                place(g, x, y, gly, ring->color, ring_style, true);
+                place(g, x, y, gly, ring->color, ring_style, true,
+                      ring->has_bg ? &ring->bg_color : NULL, ring->has_bg);
             }
         }
     }
 
-    paint_background(g, spec->grid_radius);
+    if (params->ripple && params->ripple_period > 0) {
+        paint_ripple(g, spec->grid_radius, spec->fold,
+                     t, params->ripple_period);
+    }
+
+    if (params->fractal) {
+        const hk_rgb *colors = params->fractal_colors
+            ? params->fractal_colors
+            : hk_palette_named(HK_PAL_AURORA);
+        double field_spin = base_spin * SPIN_FIELD_FRACTION;
+        apply_fractal_field(g, spec->grid_radius, spec->fold,
+                            t, colors, field_spin);
+    } else {
+        paint_background(g, spec->grid_radius);
+    }
 }
 
 /* ---- backdrop ------------------------------------------------------ */

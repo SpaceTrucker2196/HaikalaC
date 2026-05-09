@@ -21,6 +21,7 @@ SRCS = \
     $(SRC_DIR)/mandala.c \
     $(SRC_DIR)/translate.c \
     $(SRC_DIR)/symbols.c \
+    $(SRC_DIR)/palette.c \
     $(SRC_DIR)/haiku.c \
     $(SRC_DIR)/animate.c
 

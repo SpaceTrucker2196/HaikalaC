@@ -53,12 +53,35 @@ static const hk_rgb *palette_for_season(const char *season)
 /* ---- token band classification ------------------------------------- */
 
 static const char *const SUBJECT_TOKENS[] = {
-    "frog", "crow", "heron", "moon", "sun", "star", "bell", "temple",
-    "blossom", "morning_glory", "warriors", "lightning",
+    /* creatures */
+    "frog", "crow", "worm", "firefly", "cicada", "cuckoo", "dragonfly",
+    "butterfly", "cricket", "sparrow", "goose", "duck", "heron", "snail",
+    "fish", "octopus", "mosquito", "spider", "deer", "horse", "cat",
+    "skylark", "monkey", "fly",
+    /* celestial / luminous */
+    "moon", "sun", "star", "candle", "lantern", "bell", "stone", "rock",
+    /* plants treated as primary subjects */
+    "morning_glory", "plum", "blossom", "petal", "cherry", "peony",
+    "wisteria", "lotus", "iris", "chrysanthemum", "chestnut", "persimmon",
+    /* humans */
+    "children", "child", "warriors", "messenger", "monk", "traveler",
+    "beggar", "woman", "man", "pilgrim", "thief", "buddha",
+    /* objects with subjecthood */
+    "mask", "comb", "kite", "boat", "fan", "mirror", "cart", "pot",
+    /* named landforms */
+    "village", "mountain", "temple", "hut",
 };
 static const char *const ACTION_TOKENS[] = {
-    "splash", "stillness", "silence", "dream", "memory", "first",
-    "echo", "awakening", "longing", "joy",
+    "splash", "stillness", "silence", "transfer", "drift", "passing",
+    "echo", "flame", "joy", "kindness", "dream", "memory", "fragrance",
+    "flood", "first", "beginning", "loneliness", "longing", "gratitude",
+    "sleep", "dance", "climbing", "vanishing", "tears", "coolness",
+    "opening", "awakening", "lingering", "freedom", "regret", "secret",
+    "irony", "frailty", "patience", "slow", "work", "planting", "return",
+    "stretching", "sudden", "breaking", "smile", "dust", "song", "voice",
+    "scent", "sound", "prayer", "parting", "sickness", "journey",
+    "thaw", "crossing", "ford", "color", "repetition", "current",
+    "breath",
 };
 
 static bool token_in(const char *tok, const char *const *list, size_t n)
@@ -115,7 +138,8 @@ static double band_density(hk_band band)
 
 /* ---- main entry ---------------------------------------------------- */
 
-bool hk_haiku_to_spec(const hk_haiku *h, int fold, int grid_radius, hk_spec *out)
+bool hk_haiku_to_spec(const hk_haiku *h, int fold, int grid_radius,
+                      bool no_emoji, hk_spec *out)
 {
     if (!h || !out || h->n_tokens == 0) {
         return false;
@@ -131,24 +155,35 @@ bool hk_haiku_to_spec(const hk_haiku *h, int fold, int grid_radius, hk_spec *out
     out->fold        = fold;
     out->grid_radius = grid_radius;
     out->haiku_id    = h->id;
+    out->no_emoji    = no_emoji;
 
     const hk_rgb *palette = palette_for_season(h->season);
     out->center_color = palette[0];
 
+    /* Glyph picker: emoji-on or text-only. */
+    const char *const *(*pick)(const char *, size_t *) =
+        no_emoji ? hk_text_glyphs_for : hk_glyphs_for;
+
     /* center glyph from tokens[0][0]. */
     size_t n_glyphs = 0;
-    const char *const *gset = hk_glyphs_for(h->tokens[0], &n_glyphs);
+    const char *const *gset = pick(h->tokens[0], &n_glyphs);
     if (!gset || n_glyphs == 0) {
         return false;
     }
     snprintf(out->center_glyph, sizeof(out->center_glyph), "%s", gset[0]);
+
+    /* In --no-emoji mode every ring also gets a background tint from
+     * the season palette so block/dingbat glyphs build colorful patches
+     * rather than thin colored outlines. */
+    /* Ring index → bg color (offset by +2 so fg/bg contrast). */
+    /* Implemented inline below. */
 
     /* ----- lotus throne — fixed Buddhist mandala detail ------------- */
     static const char *const lotus_glyphs[] = { "❀" };
     double lotus_r = 0.16 * grid_radius;
     if (lotus_r < 1.4) lotus_r = 1.4;
 
-    out->rings[out->n_rings++] = (hk_ring){
+    hk_ring lotus = {
         .radius   = lotus_r,
         .glyphs   = lotus_glyphs,
         .n_glyphs = 1,
@@ -157,7 +192,13 @@ bool hk_haiku_to_spec(const hk_haiku *h, int fold, int grid_radius, hk_spec *out
         .band     = HK_BAND_INNER,
         .shape    = HK_SHAPE_CIRCLE,
         .phase    = M_PI / fold,
+        .has_bg   = false,
     };
+    if (no_emoji) {
+        lotus.bg_color = palette[(0 + 2) % 5];
+        lotus.has_bg = true;
+    }
+    out->rings[out->n_rings++] = lotus;
 
     /* ----- content rings, banded ------------------------------------ */
     /* Iterate bands inner→middle→outer; tokens go where their band says. */
@@ -184,7 +225,7 @@ bool hk_haiku_to_spec(const hk_haiku *h, int fold, int grid_radius, hk_spec *out
         for (size_t i = 0; i < n_band && out->n_rings < 16; ++i) {
             const char *tok = band_tokens[i];
             size_t glyph_n = 0;
-            const char *const *glyphs = hk_glyphs_for(tok, &glyph_n);
+            const char *const *glyphs = pick(tok, &glyph_n);
             if (!glyphs || glyph_n == 0) {
                 continue;
             }
@@ -222,7 +263,7 @@ bool hk_haiku_to_spec(const hk_haiku *h, int fold, int grid_radius, hk_spec *out
                                 2.0 * M_PI / fold);
             ring_idx++;
 
-            out->rings[out->n_rings++] = (hk_ring){
+            hk_ring rr = {
                 .radius   = r,
                 .glyphs   = glyphs,
                 .n_glyphs = glyph_n,
@@ -231,7 +272,13 @@ bool hk_haiku_to_spec(const hk_haiku *h, int fold, int grid_radius, hk_spec *out
                 .band     = band,
                 .shape    = shape,
                 .phase    = phase,
+                .has_bg   = false,
             };
+            if (no_emoji) {
+                rr.bg_color = palette[(ring_idx + 2) % 5];
+                rr.has_bg = true;
+            }
+            out->rings[out->n_rings++] = rr;
         }
     }
 

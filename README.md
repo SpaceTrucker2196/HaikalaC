@@ -1,9 +1,10 @@
 # HaikalaC
 
 A breathing haiku mandala for the terminal — pure C99, no third-party
-dependencies. A port of [haikala](https://github.com/SpaceTrucker2196/haikala)
+dependencies. A 1:1 port of [haikala](https://github.com/SpaceTrucker2196/haikala)
 (the Python version) aimed at maximum portability: anywhere you have a
-C99 toolchain and a POSIX-ish system, this should compile in seconds.
+C99 toolchain, libc, and POSIX termios/ioctl, this should compile in
+seconds.
 
 ## Build
 
@@ -15,75 +16,85 @@ make
 That's it. No package manager, no virtualenv, no submodules.
 
 Tested on macOS (clang) and Linux (gcc). Other POSIX systems with a
-C99 compiler, libc, `termios.h`, and `sys/ioctl.h` should work.
+C99 compiler should work.
 
 ## Run
 
 ```sh
-./haikalac --list                              # show available haiku
-./haikalac                                     # animated, random, huge size
-./haikalac --haiku old_pond                    # specific haiku
-./haikalac --haiku old_pond --no-animate       # render once and exit
-./haikalac --size medium --bpm 4               # smaller, slower breath
-./haikalac --fold 12                           # higher rotational symmetry
+./haikalac --list                                   # 100 haiku
+./haikalac                                          # animated, random
+./haikalac --haiku old_pond                         # specific haiku
+./haikalac --haiku old_pond --no-animate            # render once and exit
+./haikalac --size medium --bpm 4                    # smaller, slower
+
+./haikalac --animate --fractal                      # Julia-set background
+./haikalac --animate --fractal --palette ocean      # named palette
+./haikalac --animate --fractal --palette auto       # derive from haiku words
+./haikalac --animate --cycle                        # slow hue rotation
+./haikalac --animate --ripple                       # rings sweep outward
+./haikalac --animate --spin                         # kaleidoscope mode
+./haikalac --animate --emanate                      # hue waves with cycling symmetry
+./haikalac --animate --no-emoji                     # block/dingbat + bg tints
+
+./haikalac --animate --fractal --ripple --spin --cycle --emanate
 ```
 
-`q`, `Esc`, or `Ctrl-C` exits the animation cleanly (the alternate
-screen buffer is restored, raw mode is undone).
+`q`, `Esc`, or `Ctrl-C` exits the animation cleanly (alternate screen
+buffer is restored, raw mode is undone).
 
-## What's in this initial port
+## Feature parity with Python upstream
 
-- 10 curated haiku (Bashō, Buson, Chiyo-ni)
-- 36 tokens with full glyph vocabularies
-- Spec construction with banded rings (inner/middle/outer)
-- Lotus throne ring (Buddhist mandala detail)
-- Static fullscreen backdrop: sparse star/dot field, cardinal axis
-  lines, diagonal wheel-spoke hints, four lotus-gate toranas
-- Breath animation (sinusoidal radius/density modulation)
-- Truecolor (24-bit) ANSI output
-- Raw-mode terminal handling with clean restore on signal
-- Build & smoke test suite (`make test`)
+All animations and modes from the Python `haikala` are present:
 
-## What's not (yet) ported from Python upstream
-
-- Fractal background (Julia set with dihedral folding)
-- Hue cycling (`--cycle`)
-- Ripple effect (`--ripple`)
-- Kaleidoscope spin (`--spin`)
-- Emanating hue waves (`--emanate`)
-- `--no-emoji` mode and cell background tints
-- Word-derived auto palette (`--palette auto`)
-- The other 90 curated haiku
-- Per-ring varying breath speeds
-
-These slot in as discrete additions; see the matching modules in
-`mandala.c` / `animate.c` for the integration points.
+| Feature                       | Status |
+|-------------------------------|--------|
+| 100 curated haiku             | ✓ |
+| ~150 token → glyph vocabulary | ✓ |
+| Banded ring layout (inner/middle/outer) | ✓ |
+| Lotus throne ring (Buddhist mandala detail) | ✓ |
+| Static fullscreen backdrop with axis lines + lotus gates | ✓ |
+| Sinusoidal breath animation   | ✓ |
+| Per-ring varying breath speed (cascading wave) | ✓ |
+| Hue cycling (`--cycle`)       | ✓ |
+| Fractal Julia-set background, dihedral folded | ✓ |
+| 8 named palettes (aurora/ember/ocean/forest/sakura/twilight/lava/coral) | ✓ |
+| Auto palette derived from haiku words | ✓ |
+| Auto fold derived from word/token counts | ✓ |
+| Ripple effect (transient rings sweeping outward) | ✓ |
+| Spin / kaleidoscope (per-ring rotation, alternating directions) | ✓ |
+| Emanate (hue waves with cycling angular symmetry) | ✓ |
+| `--no-emoji` mode + cell background tints | ✓ |
+| Truecolor (24-bit) ANSI       | ✓ |
+| Build & smoke test suite      | ✓ |
 
 ## Layout
 
 ```
 HaikalaC/
-├── Makefile
+├── Makefile                 # single-command build
 ├── include/
-│   └── haikala.h           # all public types and prototypes
+│   └── haikala.h            # all public types + prototypes
 ├── src/
-│   ├── main.c              # argv parsing, dispatch
-│   ├── animate.c           # frame composer + animation loop
-│   ├── terminal.c          # termios + ANSI escape control
-│   ├── render.c            # Cell grid → ANSI string
-│   ├── mandala.c           # ring placement, backdrop, glyph helpers
-│   ├── translate.c         # haiku → MandalaSpec
-│   ├── symbols.c           # token → glyph table
-│   └── haiku.c             # curated haiku table
+│   ├── main.c               # argv parser, dispatch
+│   ├── animate.c            # per-frame composer + loop
+│   ├── terminal.c           # termios + ANSI escape control
+│   ├── render.c             # Cell grid → ANSI string, hue rotation,
+│   │                        #   bg color emission, emanate field
+│   ├── mandala.c            # ring placement, breath, spin, ripple,
+│   │                        #   fractal field, backdrop
+│   ├── translate.c          # haiku → MandalaSpec, no-emoji + bg tints
+│   ├── symbols.c            # token → glyph table (~150 entries)
+│   ├── palette.c            # RGB↔HLS, fractal palettes, word→color,
+│   │                        #   auto-fold, auto-palette
+│   └── haiku.c              # 100 curated haiku
 └── tests/
-    └── test_basic.c        # smoke tests for the deterministic pipeline
+    └── test_basic.c         # 14 smoke tests
 ```
 
 ## Compatibility notes
 
 - **UTF-8**: glyphs are stored and emitted as raw UTF-8 byte
-  sequences. Your terminal must be UTF-8 capable (every modern terminal
-  is, by default).
+  sequences. Your terminal must be UTF-8 capable.
 - **Truecolor**: every reasonable modern terminal supports 24-bit
   ANSI (macOS Terminal, iTerm2, kitty, alacritty, wezterm, GNOME
   Terminal, Windows Terminal). If yours doesn't, colors will look

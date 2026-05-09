@@ -52,6 +52,31 @@ typedef struct {
     hk_cell *cells; /* row-major: cells[y * width + x] */
 } hk_grid;
 
+/* ---------- color math --------------------------------------------- */
+
+/* Rotate `base` by `degrees` in HLS space. Returns the new RGB. */
+hk_rgb hk_rotate_hue(hk_rgb base, double degrees);
+
+/* ---------- fractal palettes (8 stops each) ------------------------ */
+
+typedef enum {
+    HK_PAL_AURORA = 0,
+    HK_PAL_EMBER,
+    HK_PAL_OCEAN,
+    HK_PAL_FOREST,
+    HK_PAL_SAKURA,
+    HK_PAL_TWILIGHT,
+    HK_PAL_LAVA,
+    HK_PAL_CORAL,
+    HK_PAL_COUNT,
+} hk_palette_id;
+
+#define HK_PALETTE_STOPS 8
+
+const hk_rgb *hk_palette_named(hk_palette_id id);
+hk_palette_id hk_palette_id_from_name(const char *name); /* returns -1 if unknown */
+const char   *hk_palette_name(hk_palette_id id);
+
 /* ---------- haiku & symbols ----------------------------------------- */
 
 typedef struct {
@@ -61,7 +86,7 @@ typedef struct {
     const char        *line3;
     const char        *author;
     const char        *season;   /* "spring"|"summer"|"autumn"|"winter"|"new_year" */
-    const char *const *tokens;   /* array of token strings */
+    const char *const *tokens;
     size_t             n_tokens;
 } hk_haiku;
 
@@ -70,8 +95,13 @@ extern const size_t   hk_haiku_count;
 
 const hk_haiku *hk_haiku_get(const char *id);
 
-/* Look up the glyph tuple for a token. Returns NULL if the token is unknown. */
 const char *const *hk_glyphs_for(const char *token, size_t *out_n);
+const char *const *hk_text_glyphs_for(const char *token, size_t *out_n);
+
+/* ---------- auto-derived params (palette, fold) -------------------- */
+
+int  hk_fold_for_haiku(const hk_haiku *h);
+bool hk_palette_from_haiku(const hk_haiku *h, hk_rgb out[HK_PALETTE_STOPS]);
 
 /* ---------- mandala spec -------------------------------------------- */
 
@@ -94,30 +124,37 @@ typedef struct {
     size_t             n_glyphs;
     double             density;
     hk_rgb             color;
+    hk_rgb             bg_color;
+    bool               has_bg;
     hk_band            band;
     hk_shape           shape;
     double             phase;
 } hk_ring;
 
 typedef struct {
-    int     fold;
-    hk_ring rings[16];   /* fixed cap; mandalas have ≤ ~9 rings in practice */
-    size_t  n_rings;
-    char    center_glyph[HK_MAX_GLYPH_BYTES];
-    hk_rgb  center_color;
-    int     grid_radius;
+    int        fold;
+    hk_ring    rings[16];
+    size_t     n_rings;
+    char       center_glyph[HK_MAX_GLYPH_BYTES];
+    hk_rgb     center_color;
+    int        grid_radius;
+    bool       no_emoji;       /* spec was built in --no-emoji mode */
     const char *haiku_id;
 } hk_spec;
 
-/* Sizes (y-cell radii). Width is 4*r+1, height is 2*r+1. */
 typedef enum {
-    HK_SIZE_SMALL  = 7,   /* fits tight terminals */
-    HK_SIZE_MEDIUM = 11,  /* fits 80x24 */
+    HK_SIZE_SMALL  = 7,
+    HK_SIZE_MEDIUM = 11,
     HK_SIZE_LARGE  = 15,
-    HK_SIZE_HUGE   = 20,  /* default — circular ~40 tall */
+    HK_SIZE_HUGE   = 20,
 } hk_size;
 
-bool hk_haiku_to_spec(const hk_haiku *h, int fold, int grid_radius, hk_spec *out);
+bool hk_haiku_to_spec(
+    const hk_haiku *h,
+    int    fold,
+    int    grid_radius,
+    bool   no_emoji,
+    hk_spec *out);
 
 /* ---------- mandala rendering --------------------------------------- */
 
@@ -128,29 +165,68 @@ void     hk_grid_clear(hk_grid *g);
 bool hk_is_wide(const char *glyph);
 bool hk_is_emoji(const char *glyph);
 
-/* Render the spec into `out` (must already be sized for spec->grid_radius).
- * `breath` is in [-1, 1]: 0 neutral, +1 full inhale, -1 full exhale. */
-void hk_render_spec(const hk_spec *spec, double breath, hk_grid *out);
+/* Render parameters bundle. Defaults produce a calm, breath-only render
+ * that matches the original simple mode. Set flags for the various
+ * Python-upstream features. */
+typedef struct {
+    double t;
+    double breath;
+    double breath_period;
+    bool   vary_breath;
+    bool   ripple;
+    double ripple_period;
+    bool   spin;
+    double spin_period;
+    bool   fractal;
+    const hk_rgb *fractal_colors; /* 8 stops, NULL = aurora default */
+} hk_render_params;
+
+void hk_render_params_default(hk_render_params *p);
+
+/* Render the spec into `out`. Out must already be sized for the spec. */
+void hk_render_spec(const hk_spec *spec,
+                    const hk_render_params *params,
+                    hk_grid *out);
 
 /* ---------- backdrop ------------------------------------------------ */
 
-/* Build a deterministic, dim full-screen backdrop sized to the terminal.
- * Caller owns the returned grid (free with hk_grid_free_arbitrary). */
 hk_grid *hk_backdrop_new(int width, int height, uint32_t seed);
 void     hk_grid_free_arbitrary(hk_grid *g);
 
 /* ---------- compose & emit ------------------------------------------ */
 
-/* Stamp `src` onto `dst` at (top, left). EMPTY src cells fall through. */
 void hk_stamp_grid(hk_grid *dst, const hk_grid *src, int top, int left);
-
-/* Center `text` (UTF-8) onto `dst` at the given row, with the given style. */
 void hk_stamp_text_line(hk_grid *dst, const char *text, int row, uint8_t style);
 
-/* Convert a Cell grid into ANSI escape sequences. Caller provides a buffer.
- * Returns number of bytes written (excluding NUL). If `bufsize` is too
- * small, returns the size required (computed conservatively). */
-size_t hk_grid_to_ansi(const hk_grid *g, char *buf, size_t bufsize);
+/* Per-cell hue offset closure. Returns degrees to add to that cell's
+ * hue rotation. NULL means: use only the global hue_shift. */
+typedef double (*hk_hue_field_fn)(int x, int y, void *user);
+
+/* Convert a Cell grid into ANSI escape sequences with hue rotation
+ * applied to non-static cells. Returns bytes written. */
+size_t hk_grid_to_ansi(
+    const hk_grid *g,
+    double hue_shift,
+    hk_hue_field_fn hue_field,
+    void *hue_field_user,
+    char *buf,
+    size_t bufsize);
+
+/* ---------- emanating-wave hue field ------------------------------- */
+
+typedef struct {
+    int    cx, cy;            /* center in canvas coords */
+    double t;                 /* current time, seconds */
+    double period;            /* seconds per pulse */
+    double max_r;             /* outer radius */
+    int    folds[8];          /* angular fold sequence */
+    int    n_folds;
+    double band;              /* annulus thickness */
+    double intensity;         /* peak hue shift in degrees */
+} hk_emanate;
+
+void   hk_emanate_default(hk_emanate *e);
+double hk_emanate_at(int x, int y, void *user); /* user = const hk_emanate * */
 
 /* ---------- terminal control ---------------------------------------- */
 
@@ -159,14 +235,10 @@ typedef struct {
     int height;
 } hk_term_size;
 
-bool hk_term_init(void);     /* save state, enable raw mode */
-void hk_term_restore(void);  /* restore on exit */
+bool hk_term_init(void);
+void hk_term_restore(void);
 bool hk_term_size_get(hk_term_size *out);
-
-/* Non-blocking: returns true if the user pressed q/Q/ESC/Ctrl-C since
- * the last call. Drains any other pending bytes. */
 bool hk_term_quit_pressed(void);
-
 void hk_term_enter_alt_screen(void);
 void hk_term_exit_alt_screen(void);
 void hk_term_hide_cursor(void);
@@ -174,14 +246,33 @@ void hk_term_show_cursor(void);
 void hk_term_home(void);
 void hk_term_clear_screen(void);
 
-/* ---------- animation entry point ----------------------------------- */
+/* ---------- animation entry ---------------------------------------- */
 
 typedef struct {
-    int    fold;          /* 4..16 even, or 0 = auto */
-    int    grid_radius;   /* one of the hk_size enum values */
-    double bpm;           /* breaths per minute */
-    double fps;           /* target frames per second */
-    bool   no_animate;    /* render once and exit */
+    int    fold;            /* 0 = auto */
+    int    grid_radius;
+    double bpm;
+    double fps;
+    bool   no_animate;
+
+    bool   no_emoji;
+
+    bool   fractal;
+    hk_palette_id palette;  /* HK_PAL_COUNT or negative = auto */
+
+    bool   cycle;
+    double cycle_period;
+
+    bool   ripple;
+    double ripple_period;
+
+    bool   spin;
+    double spin_period;
+
+    bool   emanate;
+    double emanate_period;
+
+    bool   vary_breath;
 } hk_options;
 
 void hk_options_default(hk_options *opt);

@@ -1,10 +1,9 @@
-/* Animation loop. Compose each frame as a single ANSI string and write
- * it in one fputs/flush pair. Sleep between frames using nanosleep.
- *
- * The composer mirrors the upstream Python:
- *   - copy of the static backdrop (sized to the terminal),
- *   - haiku header lines stamped at the top,
- *   - mandala body (centered) overlaid on top.
+/* Animation loop. Composes each frame as a single ANSI string and
+ * writes it in one fputs/flush pair. Sleeps between frames using
+ * nanosleep. Wires every Python-upstream feature: breath, vary breath,
+ * cycle (hue rotation), fractal, ripple, spin (kaleidoscope), emanate
+ * (hue waves with cycling angular symmetry), no-emoji + bg tints, and
+ * auto palette/fold from the haiku.
  */
 
 #define _DEFAULT_SOURCE
@@ -31,45 +30,71 @@ void hk_options_default(hk_options *opt)
     opt->bpm         = 6.0;
     opt->fps         = 24.0;
     opt->no_animate  = false;
+
+    opt->no_emoji    = false;
+
+    opt->fractal     = false;
+    opt->palette     = (hk_palette_id)-1;  /* -1 = auto */
+
+    opt->cycle        = false;
+    opt->cycle_period = 90.0;
+
+    opt->ripple       = false;
+    opt->ripple_period = 4.0;
+
+    opt->spin         = false;
+    opt->spin_period  = 30.0;
+
+    opt->emanate         = false;
+    opt->emanate_period  = 5.0;
+
+    opt->vary_breath  = true;
 }
 
-/* fold_for_haiku — same signal as the Python:
- *   round(1.5 * n_tokens + n_words / 3), clamped to [4, 16] even. */
-static int auto_fold(const hk_haiku *h)
+/* Resolve fractal palette: explicit name → named; else auto (haiku
+ * words) → derived; fall back to aurora. Writes into `out` (8 stops). */
+static void resolve_fractal_palette(const hk_haiku *h,
+                                    hk_palette_id requested,
+                                    hk_rgb out[HK_PALETTE_STOPS])
 {
-    int n_words = 0;
-    const char *lines[] = {h->line1, h->line2, h->line3};
-    for (int i = 0; i < 3; ++i) {
-        const char *s = lines[i];
-        bool in_word = false;
-        for (; s && *s; ++s) {
-            char c = *s;
-            bool is_alpha = ((c >= 'a' && c <= 'z') ||
-                             (c >= 'A' && c <= 'Z'));
-            if (is_alpha) {
-                if (!in_word) { ++n_words; in_word = true; }
-            } else {
-                in_word = false;
-            }
-        }
+    if (requested >= 0 && requested < HK_PAL_COUNT) {
+        const hk_rgb *named = hk_palette_named(requested);
+        memcpy(out, named, sizeof(hk_rgb) * HK_PALETTE_STOPS);
+        return;
     }
-    double score = 1.5 * (double)h->n_tokens + (double)n_words / 3.0;
-    int fold = (int)floor(score + 0.5);
-    if (fold < 4) fold = 4;
-    if (fold > 16) fold = 16;
-    if (fold % 2) ++fold;
-    if (fold > 16) fold = 16;
-    return fold;
+    if (hk_palette_from_haiku(h, out)) {
+        return;
+    }
+    const hk_rgb *named = hk_palette_named(HK_PAL_AURORA);
+    memcpy(out, named, sizeof(hk_rgb) * HK_PALETTE_STOPS);
 }
 
-/* Compose one frame into the caller's buffer; return bytes written. */
+static double monotonic_seconds(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+}
+
+static void sleep_for(double seconds)
+{
+    if (seconds <= 0) return;
+    struct timespec ts;
+    ts.tv_sec  = (time_t)seconds;
+    ts.tv_nsec = (long)((seconds - (double)ts.tv_sec) * 1e9);
+    nanosleep(&ts, NULL);
+}
+
+/* Compose one frame into `buf`, returning bytes written. */
 static size_t compose_frame(char *buf, size_t bufsize,
                             const hk_grid *backdrop,
                             const hk_spec *spec,
                             const hk_haiku *haiku,
                             hk_grid *mandala_grid,
                             hk_grid *canvas,
-                            double breath)
+                            const hk_render_params *rp,
+                            double hue_shift,
+                            const hk_emanate *emanate)
 {
     /* canvas := copy of backdrop */
     memcpy(canvas->cells, backdrop->cells,
@@ -86,13 +111,12 @@ static size_t compose_frame(char *buf, size_t bufsize,
                        HK_STYLE_DIM | HK_STYLE_ITALIC);
 
     /* Render mandala body. */
-    hk_render_spec(spec, breath, mandala_grid);
+    hk_render_spec(spec, rp, mandala_grid);
 
     int header_block = header_top + 3 + 3;
     int top  = header_block;
-    if ((canvas->height - mandala_grid->height) / 2 + (header_block / 4) > top) {
-        top = (canvas->height - mandala_grid->height) / 2 + (header_block / 4);
-    }
+    int alt  = (canvas->height - mandala_grid->height) / 2 + (header_block / 4);
+    if (alt > top) top = alt;
     if (top + mandala_grid->height > canvas->height) {
         top = canvas->height - mandala_grid->height;
         if (top < 0) top = 0;
@@ -101,63 +125,75 @@ static size_t compose_frame(char *buf, size_t bufsize,
     if (left < 0) left = 0;
     hk_stamp_grid(canvas, mandala_grid, top, left);
 
-    return hk_grid_to_ansi(canvas, buf, bufsize);
-}
+    /* Update emanate center to current mandala location. */
+    hk_emanate local;
+    if (emanate) {
+        local = *emanate;
+        local.cx = left + mandala_grid->width / 2;
+        local.cy = top + mandala_grid->height / 2;
+    }
 
-static void sleep_for(double seconds)
-{
-    if (seconds <= 0) return;
-    struct timespec ts;
-    ts.tv_sec  = (time_t)seconds;
-    ts.tv_nsec = (long)((seconds - (double)ts.tv_sec) * 1e9);
-    nanosleep(&ts, NULL);
-}
-
-static double monotonic_seconds(void)
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+    return hk_grid_to_ansi(canvas,
+                           hue_shift,
+                           emanate ? hk_emanate_at : NULL,
+                           emanate ? &local : NULL,
+                           buf, bufsize);
 }
 
 int hk_run(const hk_haiku *h, const hk_options *opt)
 {
     if (!h || !opt) return 1;
 
-    int fold = (opt->fold == 0) ? auto_fold(h) : opt->fold;
+    int fold = (opt->fold == 0) ? hk_fold_for_haiku(h) : opt->fold;
     int radius = opt->grid_radius;
     if (radius < 5) radius = HK_SIZE_HUGE;
 
     hk_spec spec;
-    if (!hk_haiku_to_spec(h, fold, radius, &spec)) {
+    if (!hk_haiku_to_spec(h, fold, radius, opt->no_emoji, &spec)) {
         fprintf(stderr, "haikalac: failed to build mandala spec for %s\n",
                 h->id);
         return 1;
     }
 
+    /* Resolve fractal palette if needed. */
+    hk_rgb fractal_colors[HK_PALETTE_STOPS];
+    if (opt->fractal) {
+        resolve_fractal_palette(h, opt->palette, fractal_colors);
+    }
+
+    /* Build a render-params bundle that mirrors the options. */
+    hk_render_params rp;
+    hk_render_params_default(&rp);
+    rp.ripple        = opt->ripple;
+    rp.ripple_period = opt->ripple_period;
+    rp.spin          = opt->spin;
+    rp.spin_period   = opt->spin_period;
+    rp.fractal       = opt->fractal;
+    rp.fractal_colors = opt->fractal ? fractal_colors : NULL;
+
     if (opt->no_animate) {
-        /* Static one-shot render: no terminal init, no alt screen. */
         hk_grid *mandala = hk_grid_new(radius);
         if (!mandala) return 1;
-        hk_render_spec(&spec, 0.0, mandala);
+        rp.t = 0.0;
+        rp.breath = 0.0;
+        rp.vary_breath = false;
+        hk_render_spec(&spec, &rp, mandala);
 
-        /* Output haiku header in plain text + the mandala. */
         printf("\n%*s%s\n", (mandala->width - (int)strlen(h->line1)) / 2, "",
                h->line1);
         printf("%*s%s\n", (mandala->width - (int)strlen(h->line2)) / 2, "",
                h->line2);
         printf("%*s%s\n", (mandala->width - (int)strlen(h->line3)) / 2, "",
                h->line3);
-        printf("\n%*s— %s\n\n", (mandala->width - (int)strlen(h->author) - 2) / 2,
-               "", h->author);
+        printf("\n%*s— %s\n\n",
+               (mandala->width - (int)strlen(h->author) - 2) / 2, "",
+               h->author);
 
-        /* ANSI buffer needs ~30 bytes/cell for SGR + glyph in the worst
-         * case; round up to 64. */
-        size_t bufsize = (size_t)mandala->width * (size_t)mandala->height * 64
-                         + 1024;
+        size_t bufsize = (size_t)mandala->width * (size_t)mandala->height
+                         * 96 + 1024;
         char *buf = (char *)malloc(bufsize);
         if (!buf) { hk_grid_free(mandala); return 1; }
-        hk_grid_to_ansi(mandala, buf, bufsize);
+        hk_grid_to_ansi(mandala, 0.0, NULL, NULL, buf, bufsize);
         fputs(buf, stdout);
         fputs("\n", stdout);
         free(buf);
@@ -165,7 +201,7 @@ int hk_run(const hk_haiku *h, const hk_options *opt)
         return 0;
     }
 
-    /* Animated mode: alt screen, raw mode, repaint loop. */
+    /* Animated mode. */
     if (!hk_term_init()) {
         fprintf(stderr, "haikalac: not running in a tty; use --no-animate\n");
         return 1;
@@ -180,9 +216,6 @@ int hk_run(const hk_haiku *h, const hk_options *opt)
                                         (uint32_t)0x9e3779b1u);
     hk_grid *mandala  = hk_grid_new(radius);
     hk_grid *canvas   = hk_backdrop_new(term.width, term.height, 0);
-    /* Replace canvas with a fresh empty grid; we use canvas as a working
-     * copy so we don't need to allocate every frame. The seed=0 backdrop
-     * we just made will be overwritten by memcpy each frame. */
     if (!backdrop || !mandala || !canvas) {
         hk_grid_free(backdrop);
         hk_grid_free(mandala);
@@ -193,8 +226,7 @@ int hk_run(const hk_haiku *h, const hk_options *opt)
         return 1;
     }
 
-    /* Allocate a generous frame buffer. */
-    size_t bufsize = (size_t)term.width * (size_t)term.height * 48 + 4096;
+    size_t bufsize = (size_t)term.width * (size_t)term.height * 96 + 4096;
     char *buf = (char *)malloc(bufsize);
     if (!buf) {
         hk_grid_free(backdrop); hk_grid_free(mandala); hk_grid_free(canvas);
@@ -204,16 +236,29 @@ int hk_run(const hk_haiku *h, const hk_options *opt)
 
     double period = 60.0 / (opt->bpm > 0 ? opt->bpm : 6.0);
     double frame_interval = 1.0 / (opt->fps > 0 ? opt->fps : 24.0);
+    rp.breath_period = period;
+    rp.vary_breath = opt->vary_breath;
+
+    hk_emanate emanate;
+    hk_emanate_default(&emanate);
+    emanate.period = opt->emanate_period;
+    emanate.max_r  = (double)(spec.grid_radius + 1);
+
     double start = monotonic_seconds();
 
     while (1) {
         if (hk_term_quit_pressed()) break;
         double t = monotonic_seconds() - start;
-        double breath = sin(2.0 * M_PI * t / period);
+        rp.t = t;
+        rp.breath = sin(2.0 * M_PI * t / period);
 
-        size_t n = compose_frame(buf, bufsize, backdrop, &spec, h,
-                                 mandala, canvas, breath);
-        (void)n;
+        double cycle_period = opt->cycle_period > 1.0 ? opt->cycle_period : 1.0;
+        double hue_shift = opt->cycle ? (t / cycle_period) * 360.0 : 0.0;
+
+        emanate.t = t;
+        compose_frame(buf, bufsize, backdrop, &spec, h, mandala, canvas,
+                      &rp, hue_shift,
+                      opt->emanate ? &emanate : NULL);
         hk_term_home();
         fputs(buf, stdout);
         fflush(stdout);
