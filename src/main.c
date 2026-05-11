@@ -17,45 +17,53 @@ static void usage(FILE *out)
         "Usage: haikalac [options]\n"
         "\n"
         "Selection:\n"
-        "  --haiku <id>          render a specific haiku (see --list)\n"
-        "  --list                list available haiku and exit\n"
+        "  -H, --haiku <id>          render a specific haiku (see --list)\n"
+        "  -l, --list                list available haiku and exit\n"
         "\n"
         "Geometry & timing:\n"
-        "  --size <s>            small | medium | large | huge | max\n"
-        "                          (default huge; max fits the current terminal)\n"
-        "  --fold <n>            auto | 4 | 6 | 8 | 10 | 12 | 14 | 16\n"
-        "  --bpm <n>             breaths per minute (default 6)\n"
-        "  --fps <n>             frames per second (default 24)\n"
-        "  --no-animate          render once and exit\n"
+        "  -s, --size <s>            small | medium | large | huge | max\n"
+        "                            (default huge; max fits current terminal)\n"
+        "  -F, --fold <n>            auto | 4 | 6 | 8 | 10 | 12 | 14 | 16\n"
+        "  -b, --bpm <n>             breaths per minute (default 6)\n"
+        "  -r, --fps <n>             frames per second (default 24)\n"
+        "  -n, --no-animate          render once and exit\n"
         "\n"
         "Visual modes:\n"
-        "  --no-emoji            colorable Unicode + bg tints (no emoji)\n"
-        "  --emoji               default emoji mode\n"
-        "  --fractal             Julia-set background, dihedral folded\n"
-        "  --palette <name>      auto | aurora | ember | ocean | forest |\n"
-        "                        sakura | twilight | lava | coral\n"
-        "  --cycle               slow hue rotation across the mandala\n"
-        "  --cycle-period <s>    seconds for one full hue rotation (default 90)\n"
-        "  --ripple              transient rings sweep outward from center\n"
-        "  --ripple-period <s>   seconds per ripple (default 4)\n"
-        "  --spin                kaleidoscope: per-ring rotation, alternating\n"
-        "  --spin-period <s>     innermost ring revolution (default 30)\n"
-        "  --emanate             hue waves with cycling angular symmetry\n"
-        "  --emanate-period <s>  seconds per wave (default 5)\n"
-        "  --no-vary-breath      one synchronized breath for all rings\n"
+        "  -e, --no-emoji            colorable Unicode + bg tints (no emoji)\n"
+        "      --emoji               default emoji mode\n"
+        "  -f, --fractal             Julia-set background, dihedral folded\n"
+        "      --no-fractal          turn fractal off\n"
+        "  -P, --palette <name>      auto | aurora | ember | ocean | forest |\n"
+        "                            sakura | twilight | lava | coral\n"
+        "  -c, --cycle               slow hue rotation across the mandala\n"
+        "      --cycle-period <s>    seconds for one full hue rotation (default 90)\n"
+        "  -R, --ripple              transient rings sweep outward from center\n"
+        "      --ripple-period <s>   seconds per ripple (default 4)\n"
+        "  -S, --spin                kaleidoscope: per-ring rotation, alternating\n"
+        "      --spin-period <s>     innermost ring revolution (default 30)\n"
+        "  -E, --emanate             hue waves with cycling angular symmetry\n"
+        "      --emanate-period <s>  seconds per wave (default 5)\n"
+        "      --no-vary-breath      one synchronized breath for all rings\n"
         "\n"
         "Weather mode (forces --fractal; needs `curl` on PATH):\n"
-        "  --weather             fetch local weather, derive palette\n"
-        "  --zip <code>          zip / postal code (else prompts on stdin)\n"
+        "  -w, --weather             fetch local weather, derive palette\n"
+        "  -z, --zip <code>          zip / postal code (else prompts on stdin)\n"
         "\n"
         "Sound mode (audio-reactive hue rotation; needs `sox` on PATH):\n"
-        "  --sound               drive hue rotation from microphone level\n"
-        "  --sound-gain <n>      multiplier on energy (default 1.0)\n"
+        "  -a, --sound               drive hue rotation from microphone level\n"
+        "  -g, --sound-gain <n>      multiplier on energy (default 1.0)\n"
         "\n"
-        "  -h, --help            show this help\n"
+        "  -h, --help                show this help\n"
         "\n"
         "Press q or Ctrl-C in animation mode to exit.\n",
         out);
+}
+
+/* Accept either the short form or the long form. NULL short skips. */
+static bool match(const char *arg, const char *short_, const char *long_)
+{
+    if (short_ && strcmp(arg, short_) == 0) return true;
+    return strcmp(arg, long_) == 0;
 }
 
 static int parse_size(const char *s)
@@ -103,37 +111,34 @@ int main(int argc, char **argv)
 
     for (int i = 1; i < argc; ++i) {
         const char *a = argv[i];
-        if (strcmp(a, "-h") == 0 || strcmp(a, "--help") == 0) {
-            usage(stdout); return 0;
-        }
-        if (strcmp(a, "--list") == 0) { list_haiku(); return 0; }
-        if (strcmp(a, "--no-animate") == 0) { opt.no_animate = true; continue; }
-        if (strcmp(a, "--no-emoji")   == 0) { opt.no_emoji   = true; continue; }
-        if (strcmp(a, "--emoji")      == 0) { opt.no_emoji   = false; continue; }
-        if (strcmp(a, "--fractal")    == 0) { opt.fractal    = true; continue; }
-        if (strcmp(a, "--no-fractal") == 0) { opt.fractal    = false; continue; }
-        if (strcmp(a, "--cycle")      == 0) { opt.cycle      = true; continue; }
-        if (strcmp(a, "--no-cycle")   == 0) { opt.cycle      = false; continue; }
-        if (strcmp(a, "--ripple")     == 0) { opt.ripple     = true; continue; }
-        if (strcmp(a, "--no-ripple")  == 0) { opt.ripple     = false; continue; }
-        if (strcmp(a, "--spin")       == 0) { opt.spin       = true; continue; }
-        if (strcmp(a, "--no-spin")    == 0) { opt.spin       = false; continue; }
-        if (strcmp(a, "--emanate")    == 0) { opt.emanate    = true; continue; }
-        if (strcmp(a, "--no-emanate") == 0) { opt.emanate    = false; continue; }
-        if (strcmp(a, "--no-vary-breath") == 0) { opt.vary_breath = false; continue; }
-        if (strcmp(a, "--weather") == 0) { weather_mode = true; continue; }
-        if (strcmp(a, "--zip") == 0 && i + 1 < argc) { zip = argv[++i]; continue; }
-        if (strcmp(a, "--sound") == 0)    { opt.sound = true; continue; }
-        if (strcmp(a, "--no-sound") == 0) { opt.sound = false; continue; }
-        if (strcmp(a, "--sound-gain") == 0 && i + 1 < argc) {
+        if (match(a, "-h", "--help"))             { usage(stdout); return 0; }
+        if (match(a, "-l", "--list"))             { list_haiku();  return 0; }
+        if (match(a, "-n", "--no-animate"))       { opt.no_animate = true;  continue; }
+        if (match(a, "-e", "--no-emoji"))         { opt.no_emoji = true;    continue; }
+        if (match(a, NULL, "--emoji"))            { opt.no_emoji = false;   continue; }
+        if (match(a, "-f", "--fractal"))          { opt.fractal = true;     continue; }
+        if (match(a, NULL, "--no-fractal"))       { opt.fractal = false;    continue; }
+        if (match(a, "-c", "--cycle"))            { opt.cycle = true;       continue; }
+        if (match(a, NULL, "--no-cycle"))         { opt.cycle = false;      continue; }
+        if (match(a, "-R", "--ripple"))           { opt.ripple = true;      continue; }
+        if (match(a, NULL, "--no-ripple"))        { opt.ripple = false;     continue; }
+        if (match(a, "-S", "--spin"))             { opt.spin = true;        continue; }
+        if (match(a, NULL, "--no-spin"))          { opt.spin = false;       continue; }
+        if (match(a, "-E", "--emanate"))          { opt.emanate = true;     continue; }
+        if (match(a, NULL, "--no-emanate"))       { opt.emanate = false;    continue; }
+        if (match(a, NULL, "--no-vary-breath"))   { opt.vary_breath = false; continue; }
+        if (match(a, "-w", "--weather"))          { weather_mode = true;    continue; }
+        if (match(a, "-a", "--sound"))            { opt.sound = true;       continue; }
+        if (match(a, NULL, "--no-sound"))         { opt.sound = false;      continue; }
+
+        if (match(a, "-H", "--haiku") && i + 1 < argc) { id = argv[++i]; continue; }
+        if (match(a, "-z", "--zip")   && i + 1 < argc) { zip = argv[++i]; continue; }
+        if (match(a, "-g", "--sound-gain") && i + 1 < argc) {
             opt.sound_gain = atof(argv[++i]);
             if (opt.sound_gain < 0) opt.sound_gain = 0;
             continue;
         }
-        if (strcmp(a, "--haiku") == 0 && i + 1 < argc) {
-            id = argv[++i]; continue;
-        }
-        if (strcmp(a, "--size") == 0 && i + 1 < argc) {
+        if (match(a, "-s", "--size") && i + 1 < argc) {
             const char *v = argv[++i];
             if (strcmp(v, "max") == 0) {
                 hk_term_size ts;
@@ -141,7 +146,6 @@ int main(int argc, char **argv)
                     opt.grid_radius =
                         hk_size_max_for_terminal(ts.width, ts.height);
                 } else {
-                    /* No tty / can't query: fall back to huge. */
                     opt.grid_radius = HK_SIZE_HUGE;
                 }
                 continue;
@@ -150,7 +154,7 @@ int main(int argc, char **argv)
             if (r < 0) { fprintf(stderr, "haikalac: bad size %s\n", v); return 2; }
             opt.grid_radius = r; continue;
         }
-        if (strcmp(a, "--fold") == 0 && i + 1 < argc) {
+        if (match(a, "-F", "--fold") && i + 1 < argc) {
             const char *v = argv[++i];
             if (strcmp(v, "auto") == 0) {
                 opt.fold = 0;
@@ -165,25 +169,25 @@ int main(int argc, char **argv)
             }
             continue;
         }
-        if (strcmp(a, "--bpm") == 0 && i + 1 < argc) {
+        if (match(a, "-b", "--bpm") && i + 1 < argc) {
             opt.bpm = atof(argv[++i]); continue;
         }
-        if (strcmp(a, "--fps") == 0 && i + 1 < argc) {
+        if (match(a, "-r", "--fps") && i + 1 < argc) {
             opt.fps = atof(argv[++i]); continue;
         }
-        if (strcmp(a, "--cycle-period") == 0 && i + 1 < argc) {
+        if (match(a, NULL, "--cycle-period") && i + 1 < argc) {
             opt.cycle_period = atof(argv[++i]); continue;
         }
-        if (strcmp(a, "--ripple-period") == 0 && i + 1 < argc) {
+        if (match(a, NULL, "--ripple-period") && i + 1 < argc) {
             opt.ripple_period = atof(argv[++i]); continue;
         }
-        if (strcmp(a, "--spin-period") == 0 && i + 1 < argc) {
+        if (match(a, NULL, "--spin-period") && i + 1 < argc) {
             opt.spin_period = atof(argv[++i]); continue;
         }
-        if (strcmp(a, "--emanate-period") == 0 && i + 1 < argc) {
+        if (match(a, NULL, "--emanate-period") && i + 1 < argc) {
             opt.emanate_period = atof(argv[++i]); continue;
         }
-        if (strcmp(a, "--palette") == 0 && i + 1 < argc) {
+        if (match(a, "-P", "--palette") && i + 1 < argc) {
             const char *v = argv[++i];
             if (strcmp(v, "auto") == 0) {
                 opt.palette = (hk_palette_id)-1;

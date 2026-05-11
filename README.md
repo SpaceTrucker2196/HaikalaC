@@ -20,27 +20,100 @@ C99 compiler should work.
 
 ## Run
 
+Every long option also has a short single-dash form. Use whichever you
+prefer:
+
 ```sh
-./haikalac --list                                   # 100 haiku
+./haikalac -l                                       # --list — 100 haiku
 ./haikalac                                          # animated, random
-./haikalac --haiku old_pond                         # specific haiku
-./haikalac --haiku old_pond --no-animate            # render once and exit
-./haikalac --size medium --bpm 4                    # smaller, slower
+./haikalac -H old_pond                              # --haiku <id>
+./haikalac -H old_pond -n                           # --no-animate (render once)
+./haikalac -s medium -b 4                           # --size medium --bpm 4
 
-./haikalac --animate --fractal                      # Julia-set background
-./haikalac --animate --fractal --palette ocean      # named palette
-./haikalac --animate --fractal --palette auto       # derive from haiku words
-./haikalac --animate --cycle                        # slow hue rotation
-./haikalac --animate --ripple                       # rings sweep outward
-./haikalac --animate --spin                         # kaleidoscope mode
-./haikalac --animate --emanate                      # hue waves with cycling symmetry
-./haikalac --animate --no-emoji                     # block/dingbat + bg tints
+./haikalac -f                                       # --fractal
+./haikalac -f -P ocean                              # --fractal --palette ocean
+./haikalac -f -P auto                               # derive palette from haiku words
+./haikalac -c                                       # --cycle (hue rotation)
+./haikalac -R                                       # --ripple (rings outward)
+./haikalac -S                                       # --spin (kaleidoscope)
+./haikalac -E                                       # --emanate (hue waves)
+./haikalac -e                                       # --no-emoji (color patches)
 
-./haikalac --animate --fractal --ripple --spin --cycle --emanate
+./haikalac -f -R -S -c -E                           # stack them all
 
-./haikalac --weather                                # prompts for zip
-./haikalac --weather --zip 94027                    # explicit, skip prompt
+./haikalac -w                                       # --weather (prompts for zip)
+./haikalac -w -z 94027                              # explicit zip
+./haikalac -a                                       # --sound (mic reactive)
+./haikalac -a -g 2.5                                # --sound-gain 2.5
+./haikalac -s max -f -S -c                          # fill the terminal
 ```
+
+### Sample output
+
+`./haikalac -H old_pond -n -s medium` (ANSI stripped for plain
+rendering — in your terminal each glyph is colored):
+
+```
+                 old pond—
+               a frog leaps in
+             the sound of water
+
+               — Matsuo Bashō
+
+                 ˙          ·
+              ˙   ˙        ·   · ·
+           ˙   ˙ 💧˙  ·    💧   · · ·
+        ˙       ˙    ░ ˙ · · ·       ·
+     ˙   ˙     · · · ·  ░ ˙ ░ · · ·
+       · 💧· ˙  ·˙ ·  · ··· · · · ˙💧 ˙
+  ·       ░ ˙·░ ˙ ░💦·✦· 💦· · ·˙· ˙   ˙  ·
+ · · · · ░ ˙ ░ 💦✦ ˙  · · ·✦·💦 · · ˙   ˙· ·
+  · · · ░   ░✦˙ ░ ▒🐸·🐸░🐸· · ✦ · ·      · ·
+    💧  ··· · · 🐸·░·❀ ❀ ▒ ░🐸 ░ ˙ · ˙ ·💧
+·  ˙   · · ·💦░·▒·░·❀ ░·❀ ░ ▒ ░ 💦░ ˙ · ·
+    ˙ ·  ░· ✦ ·🐸 ·❀·░💧·❀·▒·🐸˙✦░ ˙ ░ ·    ˙
+ ˙   ˙ · · ·💦 · · ·❀·▒·❀·▒·░·˙ 💦˙ ░    ˙
+    💧 ░ · ░ ˙ ░🐸·░·❀·❀· · 🐸· · ··· ˙ 💧
+    ·   ˙   ˙✦░·˙·░🐸·🐸 🐸· · ✦ · ·   ˙  · ·
+ · · · · ░·˙ ░ 💦✦ ˙  · · ·✦·💦 · ·     ˙· ·
+  · · · · ˙ ░·˙ ░ ˙💦·✦·░💦· · · ·        ·
+         💧 · · · ···˙ ░ · ░   ░ · 💧· ·
+       ˙   ˙   ·˙· ·    ˙ ░ ˙   · · · · ·
+            ˙   ˙   ˙░ ˙       · · · ·
+         ˙       💧   · · ·💧 ·     ·
+                     · · · · · ·
+                · · ·      ˙
+```
+
+The center bindu is the frog (`🐸`), surrounded by the 8-petal lotus
+throne (`❀`), then the inner ring (`🐸 ✿`), middle ring (`💦 ✦`), and
+the outer "atmosphere" ring of soft dots (`· ˙ ░ ▒`). In animated mode
+the whole thing breathes, the symmetry rotates if `-S` is set, and a
+fractal Julia field fills the disc behind it if `-f` is set.
+
+### Flags
+
+| short | long | what it does |
+|---|---|---|
+| `-h` | `--help` | show help and exit |
+| `-l` | `--list` | list available haiku |
+| `-H` | `--haiku ID` | render a specific haiku |
+| `-s` | `--size SIZE` | small / medium / large / huge / max |
+| `-F` | `--fold N` | rotational symmetry (auto, 4..16 even) |
+| `-b` | `--bpm N` | breaths per minute |
+| `-r` | `--fps N` | frames per second |
+| `-n` | `--no-animate` | render once and exit |
+| `-e` | `--no-emoji` | colorable Unicode + bg color patches |
+| `-f` | `--fractal` | Julia-set background, dihedral folded |
+| `-P` | `--palette NAME` | auto / aurora / ember / ocean / forest / sakura / twilight / lava / coral |
+| `-c` | `--cycle` | slow hue rotation |
+| `-R` | `--ripple` | rings sweep outward from center |
+| `-S` | `--spin` | kaleidoscope rotation |
+| `-E` | `--emanate` | hue waves with cycling angular symmetry |
+| `-w` | `--weather` | derive palette from local weather (needs `curl`) |
+| `-z` | `--zip CODE` | postal code for `--weather` |
+| `-a` | `--sound` | audio-reactive hue (needs `sox`) |
+| `-g` | `--sound-gain N` | multiplier on mic energy |
 
 ### Weather mode
 
