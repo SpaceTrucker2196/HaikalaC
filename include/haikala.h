@@ -253,6 +253,10 @@ typedef struct {
     double spin_period;
     bool   fractal;
     const hk_rgb *fractal_colors; /* 8 stops, NULL = aurora default */
+    /* If true, skip both fractal pass and background dot fill. The
+     * resulting grid contains only center + ring glyphs + ripples —
+     * the "ring layer" — suitable for capturing as a motion trail. */
+    bool   rings_only;
 } hk_render_params;
 
 void hk_render_params_default(hk_render_params *p);
@@ -271,6 +275,12 @@ void     hk_grid_free_arbitrary(hk_grid *g);
 
 void hk_stamp_grid(hk_grid *dst, const hk_grid *src, int top, int left);
 void hk_stamp_text_line(hk_grid *dst, const char *text, int row, uint8_t style);
+
+/* Stamp src onto dst at (top, left), scaling fg + bg color channels by
+ * `dim` ∈ [0, 1]. Used for motion trails — older snapshots stamp with
+ * smaller dim. */
+void hk_stamp_grid_dimmed(hk_grid *dst, const hk_grid *src,
+                          int top, int left, double dim);
 
 /* Per-cell hue offset closure. Returns degrees to add to that cell's
  * hue rotation. NULL means: use only the global hue_shift. */
@@ -350,6 +360,9 @@ typedef struct {
 
     bool   sound;          /* audio-reactive mode (needs sox) */
     double sound_gain;     /* multiplier on energy, default 1.0 */
+
+    bool   trails;         /* render fading echoes of past ring positions */
+    int    trail_length;   /* number of past frames to keep (1..8, default 4) */
 
     /* Optional caller-supplied 8-stop palette. When `has_forced_palette`
      * is true it overrides both `palette` (named) and the haiku-auto

@@ -114,6 +114,8 @@ fractal Julia field fills the disc behind it if `-f` is set.
 | `-z` | `--zip CODE` | postal code for `--weather` |
 | `-a` | `--sound` | audio-reactive hue (needs `sox`) |
 | `-g` | `--sound-gain N` | multiplier on mic energy |
+| `-t` | `--trails` | fading echoes of past ring positions |
+|      | `--trail-length N` | trail history depth, 1..8 (default 4) |
 
 ### Weather mode
 
@@ -151,6 +153,23 @@ re-mixed each frame:
 Bass-heavy music drifts the palette cool; bright transients pull it
 warm; balanced music stays close to the user's chosen palette but
 brighter and more saturated.
+
+The palette being modulated is the **fractal background palette** —
+the 8-stop hex ramp used to color the Julia-set field. Without
+`--fractal`, sound only drives the global hue-rotation rate.
+
+### Trails
+
+`-t` / `--trails` enables motion echoes — each frame, ring glyphs at
+their previous N positions are stamped on top of the current frame
+with a darkening factor. The fractal background is excluded (only the
+"ring layer" is captured) so the echoes read as ghost copies of the
+moving haiku glyphs, not as dim duplicates of the fill.
+
+Most visible with `-S` (spin) or `-R` (ripple), since those keep ring
+elements moving frame-to-frame. `--trail-length N` (1–8, default 4)
+sets how many past frames to retain — longer = more ghosts, dimmer
+the oldest.
 
 Install sox if missing:
 - macOS:   `brew install sox`

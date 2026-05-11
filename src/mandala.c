@@ -411,6 +411,7 @@ void hk_render_params_default(hk_render_params *p)
     p->spin_period = 30.0;
     p->fractal = false;
     p->fractal_colors = NULL;
+    p->rings_only = false;
 }
 
 void hk_render_spec(const hk_spec *spec, const hk_render_params *params,
@@ -483,6 +484,12 @@ void hk_render_spec(const hk_spec *spec, const hk_render_params *params,
     if (params->ripple && params->ripple_period > 0) {
         paint_ripple(g, spec->grid_radius, spec->fold,
                      t, params->ripple_period);
+    }
+
+    /* rings_only: skip both fractal pass and bg fill. Result: a sparse
+     * grid with just center + rings + ripples — used by trail capture. */
+    if (params->rings_only) {
+        return;
     }
 
     if (params->fractal) {
@@ -641,6 +648,46 @@ void hk_stamp_grid(hk_grid *dst, const hk_grid *src, int top, int left)
             const hk_cell *s = &src->cells[y * src->width + x];
             if (s->glyph[0] == '\0' && !s->covered) continue;
             dst->cells[dy * dst->width + dx] = *s;
+        }
+    }
+}
+
+static uint8_t scale_u8(uint8_t v, double k)
+{
+    long out = (long)((double)v * k + 0.5);
+    if (out < 0) out = 0;
+    if (out > 255) out = 255;
+    return (uint8_t)out;
+}
+
+void hk_stamp_grid_dimmed(hk_grid *dst, const hk_grid *src,
+                          int top, int left, double dim)
+{
+    if (!dst || !src) return;
+    if (dim < 0.0) dim = 0.0;
+    if (dim > 1.0) dim = 1.0;
+    for (int y = 0; y < src->height; ++y) {
+        int dy = top + y;
+        if (dy < 0 || dy >= dst->height) continue;
+        for (int x = 0; x < src->width; ++x) {
+            int dx = left + x;
+            if (dx < 0 || dx >= dst->width) continue;
+            const hk_cell *s = &src->cells[y * src->width + x];
+            if (s->glyph[0] == '\0' && !s->covered) continue;
+            hk_cell out = *s;
+            if (out.has_fg) {
+                out.fg.r = scale_u8(out.fg.r, dim);
+                out.fg.g = scale_u8(out.fg.g, dim);
+                out.fg.b = scale_u8(out.fg.b, dim);
+            }
+            if (out.has_bg) {
+                out.bg.r = scale_u8(out.bg.r, dim);
+                out.bg.g = scale_u8(out.bg.g, dim);
+                out.bg.b = scale_u8(out.bg.b, dim);
+            }
+            /* Always dim style so trails recede behind current frame. */
+            out.style |= HK_STYLE_DIM;
+            dst->cells[dy * dst->width + dx] = out;
         }
     }
 }

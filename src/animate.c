@@ -75,6 +75,9 @@ void hk_options_default(hk_options *opt)
     opt->sound        = false;
     opt->sound_gain   = 1.0;
 
+    opt->trails       = false;
+    opt->trail_length = 4;
+
     opt->has_forced_palette = false;
     /* forced_palette left zero-initialized; not consulted unless flag set */
 }
@@ -117,7 +120,17 @@ static void sleep_for(double seconds)
     nanosleep(&ts, NULL);
 }
 
-/* Compose one frame into `buf`, returning bytes written. */
+/* Compose one frame into `buf`, returning bytes written. Trails, when
+ * enabled, are captured as `rings_only` snapshots and stamped DIMMED on
+ * top of the current full mandala so old ring positions show as fading
+ * ghosts. The trail history is rotated in-place — no allocations per
+ * frame. */
+typedef struct {
+    hk_grid **history;   /* array of n_trails grids, each spec-sized */
+    int       n_trails;
+    hk_grid  *ring_layer; /* scratch for current frame's rings-only render */
+} trail_ctx;
+
 static size_t compose_frame(char *buf, size_t bufsize,
                             const hk_grid *backdrop,
                             const hk_spec *spec,
@@ -126,7 +139,8 @@ static size_t compose_frame(char *buf, size_t bufsize,
                             hk_grid *canvas,
                             const hk_render_params *rp,
                             double hue_shift,
-                            const hk_emanate *emanate)
+                            const hk_emanate *emanate,
+                            trail_ctx *trails)
 {
     /* canvas := copy of backdrop */
     memcpy(canvas->cells, backdrop->cells,
@@ -142,7 +156,7 @@ static size_t compose_frame(char *buf, size_t bufsize,
     hk_stamp_text_line(canvas, author_line, header_top + 4,
                        HK_STYLE_DIM | HK_STYLE_ITALIC);
 
-    /* Render mandala body. */
+    /* Render mandala body (full — with fractal or bg fill). */
     hk_render_spec(spec, rp, mandala_grid);
 
     int header_block = header_top + 3 + 3;
@@ -156,6 +170,28 @@ static size_t compose_frame(char *buf, size_t bufsize,
     int left = (canvas->width - mandala_grid->width) / 2;
     if (left < 0) left = 0;
     hk_stamp_grid(canvas, mandala_grid, top, left);
+
+    /* Trails: stamp dimmed historical ring layers on top of current
+     * mandala. Each older entry stamps progressively darker. */
+    if (trails && trails->n_trails > 0) {
+        for (int i = 0; i < trails->n_trails; ++i) {
+            double dim = pow(0.55, (double)(i + 1));
+            hk_stamp_grid_dimmed(canvas, trails->history[i], top, left, dim);
+        }
+        /* Render current ring-only layer for next frame's trail. */
+        hk_render_params rings = *rp;
+        rings.rings_only = true;
+        hk_render_spec(spec, &rings, trails->ring_layer);
+        /* Cycle: shift history right, copy current into [0]. */
+        hk_grid *recycled = trails->history[trails->n_trails - 1];
+        for (int i = trails->n_trails - 1; i > 0; --i) {
+            trails->history[i] = trails->history[i - 1];
+        }
+        trails->history[0] = recycled;
+        memcpy(trails->history[0]->cells, trails->ring_layer->cells,
+               (size_t)trails->ring_layer->width *
+               (size_t)trails->ring_layer->height * sizeof(hk_cell));
+    }
 
     /* Update emanate center to current mandala location. */
     hk_emanate local;
@@ -292,6 +328,26 @@ int hk_run(const hk_haiku *h, const hk_options *opt)
         }
     }
 
+    /* Trails: allocate `trail_length` ring-layer snapshots + one
+     * scratch grid for the current ring-only render. */
+    #define HK_MAX_TRAILS 8
+    int n_trails = 0;
+    hk_grid *trail_grids[HK_MAX_TRAILS];
+    hk_grid *trail_scratch = NULL;
+    trail_ctx trails_state = { NULL, 0, NULL };
+    if (opt->trails) {
+        n_trails = opt->trail_length;
+        if (n_trails < 1) n_trails = 1;
+        if (n_trails > HK_MAX_TRAILS) n_trails = HK_MAX_TRAILS;
+        for (int i = 0; i < n_trails; ++i) {
+            trail_grids[i] = hk_grid_new(radius);
+        }
+        trail_scratch = hk_grid_new(radius);
+        trails_state.history = trail_grids;
+        trails_state.n_trails = n_trails;
+        trails_state.ring_layer = trail_scratch;
+    }
+
     double start = monotonic_seconds();
     double sound_phase = 0.0;
     double prev_t      = 0.0;
@@ -335,7 +391,8 @@ int hk_run(const hk_haiku *h, const hk_options *opt)
         emanate.t = t;
         compose_frame(buf, bufsize, backdrop, &spec, h, mandala, canvas,
                       &rp, hue_shift,
-                      opt->emanate ? &emanate : NULL);
+                      opt->emanate ? &emanate : NULL,
+                      opt->trails ? &trails_state : NULL);
         hk_term_home();
         fputs(buf, stdout);
         fflush(stdout);
@@ -348,6 +405,8 @@ int hk_run(const hk_haiku *h, const hk_options *opt)
     hk_grid_free(backdrop);
     hk_grid_free(mandala);
     hk_grid_free(canvas);
+    for (int i = 0; i < n_trails; ++i) hk_grid_free(trail_grids[i]);
+    if (trail_scratch) hk_grid_free(trail_scratch);
 
     hk_term_show_cursor();
     hk_term_exit_alt_screen();

@@ -44,6 +44,8 @@ static void usage(FILE *out)
         "  -E, --emanate             hue waves with cycling angular symmetry\n"
         "      --emanate-period <s>  seconds per wave (default 5)\n"
         "      --no-vary-breath      one synchronized breath for all rings\n"
+        "  -t, --trails              fading echoes of past ring positions\n"
+        "      --trail-length <n>    trail history depth, 1..8 (default 4)\n"
         "\n"
         "Weather mode (forces --fractal; needs `curl` on PATH):\n"
         "  -w, --weather             fetch local weather, derive palette\n"
@@ -130,6 +132,14 @@ int main(int argc, char **argv)
         if (match(a, "-w", "--weather"))          { weather_mode = true;    continue; }
         if (match(a, "-a", "--sound"))            { opt.sound = true;       continue; }
         if (match(a, NULL, "--no-sound"))         { opt.sound = false;      continue; }
+        if (match(a, "-t", "--trails"))           { opt.trails = true;      continue; }
+        if (match(a, NULL, "--no-trails"))        { opt.trails = false;     continue; }
+        if (match(a, NULL, "--trail-length") && i + 1 < argc) {
+            int n = atoi(argv[++i]);
+            if (n < 1) n = 1; if (n > 8) n = 8;
+            opt.trail_length = n;
+            continue;
+        }
 
         if (match(a, "-H", "--haiku") && i + 1 < argc) { id = argv[++i]; continue; }
         if (match(a, "-z", "--zip")   && i + 1 < argc) { zip = argv[++i]; continue; }
