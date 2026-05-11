@@ -282,6 +282,34 @@ void hk_stamp_text_line(hk_grid *dst, const char *text, int row, uint8_t style);
 void hk_stamp_grid_dimmed(hk_grid *dst, const hk_grid *src,
                           int top, int left, double dim);
 
+/* ---------- Conway-style life automaton overlay -------------------- */
+
+typedef struct hk_life hk_life;
+
+hk_life *hk_life_new(int width, int height, int grid_radius);
+void     hk_life_free(hk_life *life);
+
+/* Seed alive-state from a Cell grid: every non-empty, non-covered cell
+ * inside the disc becomes a freshly-born cell. Existing state is cleared. */
+void hk_life_seed_from_grid(hk_life *life, const hk_grid *src);
+
+/* Advance one Conway generation (B3/S23). Ages survivors so the stamp
+ * can dim older cells. Returns the new alive count. */
+int  hk_life_tick(hk_life *life);
+
+/* Stamp alive cells onto `dst` at (top, left). Each cell uses a glyph
+ * picked from a small repertoire by age, and a color from the supplied
+ * 8-stop palette indexed by age. Skips dst cells whose glyph would
+ * trample the haiku bindu. */
+void hk_life_stamp(const hk_life *life,
+                   hk_grid *dst,
+                   int top, int left,
+                   const hk_rgb palette[HK_PALETTE_STOPS]);
+
+/* Alive cell count and total possible cells, for the reseed heuristic. */
+int  hk_life_alive_count(const hk_life *life);
+int  hk_life_initial_count(const hk_life *life);
+
 /* Per-cell hue offset closure. Returns degrees to add to that cell's
  * hue rotation. NULL means: use only the global hue_shift. */
 typedef double (*hk_hue_field_fn)(int x, int y, void *user);
@@ -363,6 +391,8 @@ typedef struct {
 
     bool   trails;         /* render fading echoes of past ring positions */
     int    trail_length;   /* number of past frames to keep (1..8, default 4) */
+
+    bool   life;           /* Conway-style cellular automaton overlay */
 
     /* Optional caller-supplied 8-stop palette. When `has_forced_palette`
      * is true it overrides both `palette` (named) and the haiku-auto

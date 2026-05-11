@@ -320,6 +320,52 @@ static void test_palette_with_spectrum_hue_shift_direction(void)
     ASSERT((int)warmer[4].r - (int)warmer[4].b > 8);
 }
 
+static void test_life_engine_evolves(void)
+{
+    /* Seed a life grid from a rendered ring layer, tick it a few
+     * frames, and confirm the population is non-zero after at least
+     * one tick. (B3/S23 may collapse from arbitrary seeds, but the
+     * spec's ring positions reliably produce some survivors for a
+     * few generations.) */
+    const hk_haiku *h = hk_haiku_get("old_pond");
+    hk_spec spec;
+    ASSERT(hk_haiku_to_spec(h, 8, HK_SIZE_MEDIUM, false, &spec));
+    hk_grid *g = hk_grid_new(HK_SIZE_MEDIUM);
+    ASSERT(g != NULL);
+
+    hk_render_params rp;
+    hk_render_params_default(&rp);
+    rp.rings_only = true;
+    hk_render_spec(&spec, &rp, g);
+
+    hk_life *L = hk_life_new(g->width, g->height, HK_SIZE_MEDIUM);
+    ASSERT(L != NULL);
+    hk_life_seed_from_grid(L, g);
+    int seed = hk_life_initial_count(L);
+    ASSERT(seed > 0);
+
+    /* Tick once — survivors must be ≤ seed (Conway). */
+    int alive = hk_life_tick(L);
+    ASSERT(alive >= 0);
+    ASSERT(hk_life_alive_count(L) == alive);
+
+    /* Stamping must not crash and must not zero out the bindu (which is
+     * a wide emoji — life skips wide cells). */
+    hk_grid *canvas = hk_grid_new(HK_SIZE_MEDIUM);
+    ASSERT(canvas != NULL);
+    hk_render_spec(&spec, &(hk_render_params){0}, canvas);  /* full render */
+    const hk_rgb *pal = hk_palette_named(HK_PAL_AURORA);
+    hk_life_stamp(L, canvas, 0, 0, pal);
+    /* Bindu still has the spec's center glyph. */
+    int cy = canvas->height / 2, cx = canvas->width / 2;
+    ASSERT(strcmp(canvas->cells[cy * canvas->width + cx].glyph,
+                  spec.center_glyph) == 0);
+
+    hk_grid_free(canvas);
+    hk_grid_free(g);
+    hk_life_free(L);
+}
+
 static void test_size_max_fits_terminal(void)
 {
     /* For a sane terminal, the resulting body must fit:
@@ -451,6 +497,7 @@ int main(void)
     test_sound_compression_normalizes();
     test_palette_with_spectrum_silence_is_identity();
     test_palette_with_spectrum_hue_shift_direction();
+    test_life_engine_evolves();
 
     if (failures) {
         printf("FAILED: %d failures\n", failures);

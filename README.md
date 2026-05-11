@@ -116,6 +116,7 @@ fractal Julia field fills the disc behind it if `-f` is set.
 | `-g` | `--sound-gain N` | multiplier on mic energy |
 | `-t` | `--trails` | fading echoes of past ring positions |
 |      | `--trail-length N` | trail history depth, 1..8 (default 4) |
+| `-L` | `--life` | Conway-style life automaton overlay |
 
 ### Weather mode
 
@@ -170,6 +171,28 @@ Most visible with `-S` (spin) or `-R` (ripple), since those keep ring
 elements moving frame-to-frame. `--trail-length N` (1–8, default 4)
 sets how many past frames to retain — longer = more ghosts, dimmer
 the oldest.
+
+### Life mode
+
+`-L` / `--life` runs a Conway-style cellular automaton overlay seeded
+from the ring positions. Each frame applies one B3/S23 step (born
+with exactly 3 neighbors, survive with 2 or 3) restricted to cells
+inside the mandala disc. Survivors age frame-by-frame; the renderer
+uses age to pick from a glyph repertoire (`● ◉ ◯ ○ ◌ · ˙`) and to
+index into the fractal palette so newborns are bright and oldsters
+fade toward dim dots.
+
+When the population dies out (alive < 5% of the initial seed), the
+engine reseeds from the current ring layer — the simulation feels
+like one organic cycle of birth/death rolling through the mandala
+indefinitely. The bindu (haiku center) is always skipped so the
+heart of the poem stays readable through the churn.
+
+Combine with `-f -a` to have the life cells inherit
+spectrum-modulated fractal colors:
+```
+./haikalac -L -f -a -s max
+```
 
 Install sox if missing:
 - macOS:   `brew install sox`

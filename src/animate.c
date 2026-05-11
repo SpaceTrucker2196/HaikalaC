@@ -78,6 +78,8 @@ void hk_options_default(hk_options *opt)
     opt->trails       = false;
     opt->trail_length = 4;
 
+    opt->life         = false;
+
     opt->has_forced_palette = false;
     /* forced_palette left zero-initialized; not consulted unless flag set */
 }
@@ -140,7 +142,9 @@ static size_t compose_frame(char *buf, size_t bufsize,
                             const hk_render_params *rp,
                             double hue_shift,
                             const hk_emanate *emanate,
-                            trail_ctx *trails)
+                            trail_ctx *trails,
+                            hk_life *life,
+                            const hk_rgb *life_palette)
 {
     /* canvas := copy of backdrop */
     memcpy(canvas->cells, backdrop->cells,
@@ -191,6 +195,12 @@ static size_t compose_frame(char *buf, size_t bufsize,
         memcpy(trails->history[0]->cells, trails->ring_layer->cells,
                (size_t)trails->ring_layer->width *
                (size_t)trails->ring_layer->height * sizeof(hk_cell));
+    }
+
+    /* Life automaton: tick one generation, stamp alive cells on top. */
+    if (life && life_palette) {
+        hk_life_tick(life);
+        hk_life_stamp(life, canvas, top, left, life_palette);
     }
 
     /* Update emanate center to current mandala location. */
@@ -348,6 +358,27 @@ int hk_run(const hk_haiku *h, const hk_options *opt)
         trails_state.ring_layer = trail_scratch;
     }
 
+    /* Life automaton: allocate engine sized to the mandala body and
+     * seed it from an initial render. The reseed loop below revives
+     * the simulation whenever the population dies out. */
+    hk_life *life = NULL;
+    if (opt->life) {
+        life = hk_life_new(mandala->width, mandala->height, spec.grid_radius);
+        if (life) {
+            /* Initial render to seed alive-state. */
+            hk_render_params rp_seed = rp;
+            rp_seed.rings_only = true;
+            hk_render_spec(&spec, &rp_seed, mandala);
+            hk_life_seed_from_grid(life, mandala);
+        }
+    }
+    /* Palette used to colorize alive cells: borrow the resolved
+     * fractal palette if --fractal is on, otherwise fall back to
+     * aurora. */
+    const hk_rgb *life_palette = opt->fractal
+        ? base_colors
+        : hk_palette_named(HK_PAL_AURORA);
+
     double start = monotonic_seconds();
     double sound_phase = 0.0;
     double prev_t      = 0.0;
@@ -392,7 +423,26 @@ int hk_run(const hk_haiku *h, const hk_options *opt)
         compose_frame(buf, bufsize, backdrop, &spec, h, mandala, canvas,
                       &rp, hue_shift,
                       opt->emanate ? &emanate : NULL,
-                      opt->trails ? &trails_state : NULL);
+                      opt->trails ? &trails_state : NULL,
+                      life, life_palette);
+
+        /* Reseed life when the population collapses, using the most
+         * recent full mandala_grid (which still has the ring glyphs).
+         * Triggered when alive falls below 5% of the initial seed. */
+        if (life) {
+            int alive = hk_life_alive_count(life);
+            int seed  = hk_life_initial_count(life);
+            if (alive == 0 || (seed > 0 && alive * 20 < seed)) {
+                hk_render_params rp_seed = rp;
+                rp_seed.rings_only = true;
+                hk_grid *fresh = hk_grid_new(radius);
+                if (fresh) {
+                    hk_render_spec(&spec, &rp_seed, fresh);
+                    hk_life_seed_from_grid(life, fresh);
+                    hk_grid_free(fresh);
+                }
+            }
+        }
         hk_term_home();
         fputs(buf, stdout);
         fflush(stdout);
@@ -407,6 +457,7 @@ int hk_run(const hk_haiku *h, const hk_options *opt)
     hk_grid_free(canvas);
     for (int i = 0; i < n_trails; ++i) hk_grid_free(trail_grids[i]);
     if (trail_scratch) hk_grid_free(trail_scratch);
+    if (life) hk_life_free(life);
 
     hk_term_show_cursor();
     hk_term_exit_alt_screen();

@@ -24,6 +24,7 @@ SRCS = \
     $(SRC_DIR)/palette.c \
     $(SRC_DIR)/weather.c \
     $(SRC_DIR)/sound.c \
+    $(SRC_DIR)/life.c \
     $(SRC_DIR)/haiku.c \
     $(SRC_DIR)/animate.c
 

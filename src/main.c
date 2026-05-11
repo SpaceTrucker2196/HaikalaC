@@ -46,6 +46,9 @@ static void usage(FILE *out)
         "      --no-vary-breath      one synchronized breath for all rings\n"
         "  -t, --trails              fading echoes of past ring positions\n"
         "      --trail-length <n>    trail history depth, 1..8 (default 4)\n"
+        "  -L, --life                Conway-style life automaton overlay\n"
+        "                            (cells born/die each frame, B3/S23 rules,\n"
+        "                            reseeded from rings when population dies)\n"
         "\n"
         "Weather mode (forces --fractal; needs `curl` on PATH):\n"
         "  -w, --weather             fetch local weather, derive palette\n"
@@ -134,6 +137,8 @@ int main(int argc, char **argv)
         if (match(a, NULL, "--no-sound"))         { opt.sound = false;      continue; }
         if (match(a, "-t", "--trails"))           { opt.trails = true;      continue; }
         if (match(a, NULL, "--no-trails"))        { opt.trails = false;     continue; }
+        if (match(a, "-L", "--life"))             { opt.life = true;        continue; }
+        if (match(a, NULL, "--no-life"))          { opt.life = false;       continue; }
         if (match(a, NULL, "--trail-length") && i + 1 < argc) {
             int n = atoi(argv[++i]);
             if (n < 1) n = 1; if (n > 8) n = 8;
