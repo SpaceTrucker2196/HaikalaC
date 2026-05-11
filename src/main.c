@@ -48,7 +48,8 @@ static void usage(FILE *out)
         "      --trail-length <n>    trail history depth, 1..8 (default 4)\n"
         "  -L, --life                Conway-style life automaton overlay\n"
         "                            (cells born/die each frame, B3/S23 rules,\n"
-        "                            reseeded from rings when population dies)\n"
+        "                            reseeded with random fill when pop dies)\n"
+        "      --life-density <n>    initial alive density 0.02..0.60 (default 0.18)\n"
         "\n"
         "Weather mode (forces --fractal; needs `curl` on PATH):\n"
         "  -w, --weather             fetch local weather, derive palette\n"
@@ -139,6 +140,10 @@ int main(int argc, char **argv)
         if (match(a, NULL, "--no-trails"))        { opt.trails = false;     continue; }
         if (match(a, "-L", "--life"))             { opt.life = true;        continue; }
         if (match(a, NULL, "--no-life"))          { opt.life = false;       continue; }
+        if (match(a, NULL, "--life-density") && i + 1 < argc) {
+            opt.life_density = atof(argv[++i]);
+            continue;
+        }
         if (match(a, NULL, "--trail-length") && i + 1 < argc) {
             int n = atoi(argv[++i]);
             if (n < 1) n = 1; if (n > 8) n = 8;

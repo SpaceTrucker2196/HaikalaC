@@ -79,6 +79,7 @@ void hk_options_default(hk_options *opt)
     opt->trail_length = 4;
 
     opt->life         = false;
+    opt->life_density = 0.18;
 
     opt->has_forced_palette = false;
     /* forced_palette left zero-initialized; not consulted unless flag set */
@@ -381,10 +382,13 @@ int hk_run(const hk_haiku *h, const hk_options *opt)
      * mandala, not just clustered near the center. */
     hk_life *life = NULL;
     uint32_t life_seed = (uint32_t)((uintptr_t)h ^ 0xC0FFEE);
+    double life_density = opt->life_density;
+    if (life_density < 0.02) life_density = 0.02;
+    if (life_density > 0.60) life_density = 0.60;
     if (opt->life) {
         life = hk_life_new(mandala->width, mandala->height, spec.grid_radius);
         if (life) {
-            hk_life_seed_random(life, 0.33, life_seed);
+            hk_life_seed_random(life, life_density, life_seed);
         }
     }
     /* Palette used to colorize alive cells: borrow the resolved
@@ -451,7 +455,7 @@ int hk_run(const hk_haiku *h, const hk_options *opt)
             int seed  = hk_life_initial_count(life);
             if (alive == 0 || (seed > 0 && alive * 20 < seed)) {
                 life_seed = life_seed * 1664525u + 1013904223u;
-                hk_life_seed_random(life, 0.33, life_seed);
+                hk_life_seed_random(life, life_density, life_seed);
             }
         }
         hk_term_home();

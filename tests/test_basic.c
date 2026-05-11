@@ -374,13 +374,12 @@ static void test_life_seed_random_covers_disc(void)
      * at least some live cells. */
     hk_life *L = hk_life_new(45, 23, HK_SIZE_MEDIUM);  /* same dims as medium */
     ASSERT(L != NULL);
-    hk_life_seed_random(L, 0.33, 12345u);
+    hk_life_seed_random(L, 0.18, 12345u);
     int alive = hk_life_alive_count(L);
-    /* For radius=11 in our grid units (x is stretched 2× to compensate
-     * for terminal aspect), the disc covers about 760 cells; 33%
-     * density → ~250 alive. Allow wide bounds. */
-    ASSERT(alive > 100);
-    ASSERT(alive < 400);
+    /* For radius=11 the disc covers ~760 cells in grid units;
+     * 18% density → ~137 alive. Allow wide bounds. */
+    ASSERT(alive > 60);
+    ASSERT(alive < 220);
     hk_life_free(L);
 }
 

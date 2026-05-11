@@ -404,6 +404,7 @@ typedef struct {
     int    trail_length;   /* number of past frames to keep (1..8, default 4) */
 
     bool   life;           /* Conway-style cellular automaton overlay */
+    double life_density;   /* initial alive density across the disc (0..1) */
 
     /* Optional caller-supplied 8-stop palette. When `has_forced_palette`
      * is true it overrides both `palette` (named) and the haiku-auto
