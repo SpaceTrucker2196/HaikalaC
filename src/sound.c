@@ -36,6 +36,15 @@
 #define SOUND_SAMPLE_RATE 22050
 #define SOUND_BUFFER      8192   /* int16 samples = 16 KB max per read */
 
+/* FFT window size — power of two. 512 samples = ~23 ms at 22050 Hz.
+ * Bin resolution = SAMPLE_RATE / FFT_N ≈ 43 Hz/bin. */
+#define FFT_N             512
+#define FFT_LOG2          9
+
+/* Band boundaries in Hz. */
+#define BAND_LO_HZ        250.0
+#define BAND_HI_HZ        2000.0
+
 /* Compression / AGC tuning. These are deliberately not exposed in the
  * public API — the user already has `--sound-gain` for room-level
  * adjustments, and these constants are about *shape* of the response
@@ -57,9 +66,154 @@ typedef struct {
     double ema;
 } sound_filter_state;
 
+/* Forward decl — defined below; spectrum code (above hk_sound_energy)
+ * needs to call into it. */
+static double filter_apply(sound_filter_state *st, double raw_rms,
+                           bool has_data);
+
 static FILE              *g_pipe   = NULL;
 static int                g_fd     = -1;
 static sound_filter_state g_filter = { 0.01, 0.0 };
+
+/* Spectrum analysis state. Ring buffer of the most recent FFT_N audio
+ * samples plus three per-band AGC + EMA filters. */
+typedef struct {
+    double   ring[FFT_N];
+    int      write_pos;
+    bool     primed;          /* true once the ring has been filled once */
+    sound_filter_state low;
+    sound_filter_state mid;
+    sound_filter_state high;
+    /* Pre-computed Hann window, lazily built once. */
+    double   hann[FFT_N];
+    bool     hann_ready;
+} spectrum_state;
+
+static spectrum_state g_spec = {
+    .ring       = {0},
+    .write_pos  = 0,
+    .primed     = false,
+    .low        = {0.01, 0.0},
+    .mid        = {0.01, 0.0},
+    .high       = {0.01, 0.0},
+    .hann       = {0},
+    .hann_ready = false,
+};
+
+static void hann_init(void)
+{
+    if (g_spec.hann_ready) return;
+    for (int i = 0; i < FFT_N; ++i) {
+        g_spec.hann[i] = 0.5 * (1.0 - cos(2.0 * M_PI * i / (FFT_N - 1)));
+    }
+    g_spec.hann_ready = true;
+}
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
+/* In-place radix-2 Cooley-Tukey FFT on parallel real/imag arrays.
+ * Standard bit-reverse permutation, then log2(N) butterfly passes. */
+static void fft_radix2(double *re, double *im)
+{
+    /* Bit-reverse permutation. */
+    int j = 0;
+    for (int i = 0; i < FFT_N - 1; ++i) {
+        if (i < j) {
+            double tr = re[i]; re[i] = re[j]; re[j] = tr;
+            double ti = im[i]; im[i] = im[j]; im[j] = ti;
+        }
+        int k = FFT_N >> 1;
+        while (k <= j) { j -= k; k >>= 1; }
+        j += k;
+    }
+    /* Butterflies. */
+    for (int s = 1; s <= FFT_LOG2; ++s) {
+        int m    = 1 << s;
+        int half = m >> 1;
+        double theta = -2.0 * M_PI / m;
+        double wpr = cos(theta), wpi = sin(theta);
+        for (int kk = 0; kk < FFT_N; kk += m) {
+            double wr = 1.0, wi = 0.0;
+            for (int jj = 0; jj < half; ++jj) {
+                int i1 = kk + jj;
+                int i2 = i1 + half;
+                double tr = wr * re[i2] - wi * im[i2];
+                double ti = wr * im[i2] + wi * re[i2];
+                re[i2] = re[i1] - tr;
+                im[i2] = im[i1] - ti;
+                re[i1] += tr;
+                im[i1] += ti;
+                double nwr = wr * wpr - wi * wpi;
+                wi = wr * wpi + wi * wpr;
+                wr = nwr;
+            }
+        }
+    }
+}
+
+static void spectrum_push_sample(double s)
+{
+    g_spec.ring[g_spec.write_pos++] = s;
+    if (g_spec.write_pos >= FFT_N) {
+        g_spec.write_pos = 0;
+        g_spec.primed = true;
+    }
+}
+
+/* Compute the three-band raw energies from the current ring buffer. */
+static void spectrum_compute_raw(double *raw_low, double *raw_mid, double *raw_high)
+{
+    hann_init();
+    double re[FFT_N], im[FFT_N];
+    /* Walk the ring from oldest to newest, apply Hann window. */
+    for (int i = 0; i < FFT_N; ++i) {
+        int idx = (g_spec.write_pos + i) % FFT_N;
+        re[i] = g_spec.ring[idx] * g_spec.hann[i];
+        im[i] = 0.0;
+    }
+    fft_radix2(re, im);
+
+    double hz_per_bin = (double)SOUND_SAMPLE_RATE / (double)FFT_N;
+    int lo_split = (int)(BAND_LO_HZ / hz_per_bin + 0.5);
+    int hi_split = (int)(BAND_HI_HZ / hz_per_bin + 0.5);
+    int nyquist  = FFT_N / 2;
+    if (lo_split < 1) lo_split = 1;
+    if (hi_split > nyquist) hi_split = nyquist;
+
+    double sum_low = 0.0, sum_mid = 0.0, sum_high = 0.0;
+    int n_low = 0, n_mid = 0, n_high = 0;
+    for (int k = 1; k < nyquist; ++k) {
+        double mag = sqrt(re[k] * re[k] + im[k] * im[k]);
+        if (k < lo_split)         { sum_low  += mag; ++n_low; }
+        else if (k < hi_split)    { sum_mid  += mag; ++n_mid; }
+        else                      { sum_high += mag; ++n_high; }
+    }
+    /* Mean magnitude per band — normalizes for band bin counts. */
+    *raw_low  = n_low  ? sum_low  / n_low  : 0.0;
+    *raw_mid  = n_mid  ? sum_mid  / n_mid  : 0.0;
+    *raw_high = n_high ? sum_high / n_high : 0.0;
+}
+
+bool hk_sound_spectrum(double *low, double *mid, double *high)
+{
+    if (!g_pipe || !g_spec.primed) {
+        if (low)  *low = 0.0;
+        if (mid)  *mid = 0.0;
+        if (high) *high = 0.0;
+        return false;
+    }
+    double raw_low, raw_mid, raw_high;
+    spectrum_compute_raw(&raw_low, &raw_mid, &raw_high);
+    double l = filter_apply(&g_spec.low,  raw_low,  raw_low  > 0.0);
+    double m = filter_apply(&g_spec.mid,  raw_mid,  raw_mid  > 0.0);
+    double h = filter_apply(&g_spec.high, raw_high, raw_high > 0.0);
+    if (low)  *low  = l;
+    if (mid)  *mid  = m;
+    if (high) *high = h;
+    return true;
+}
 
 /* Apply one frame of the AGC + compressor + EMA chain.
  *
@@ -157,6 +311,9 @@ double hk_sound_energy(void)
         for (size_t i = 0; i < samples; ++i) {
             double s = (double)buf[i] / 32768.0;
             sumsq += s * s;
+            /* Feed every sample into the spectrum ring as well.
+             * Cheap: just a write to a circular buffer. */
+            spectrum_push_sample(s);
         }
         double raw_rms =
             (samples > 0) ? sqrt(sumsq / (double)samples) : 0.0;

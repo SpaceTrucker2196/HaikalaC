@@ -153,10 +153,23 @@ bool   hk_sound_open(void);
 void   hk_sound_close(void);
 double hk_sound_energy(void);
 
+/* Three-band spectrum (smoothed + AGC'd). Each value is in [0, 1].
+ * Bands are split at ~250 Hz and ~2 kHz. Returns false if the sound
+ * module isn't open. */
+bool hk_sound_spectrum(double *low, double *mid, double *high);
+
 /* Test hooks: drive the AGC + compressor + EMA chain with a synthetic
  * raw RMS, bypassing the audio pipe. */
 double hk_sound_filter_apply(double raw_rms, bool has_data);
 void   hk_sound_filter_reset(void);
+
+/* Build a spectrum-modulated palette. Hue shifts cool (toward blue)
+ * when low > high, warm (toward red) when high > low; lightness +
+ * saturation lift with overall energy. The base palette is preserved
+ * when all three bands are zero. */
+void hk_palette_with_spectrum(const hk_rgb base[HK_PALETTE_STOPS],
+                              double low, double mid, double high,
+                              hk_rgb out[HK_PALETTE_STOPS]);
 
 /* ---------- mandala spec -------------------------------------------- */
 

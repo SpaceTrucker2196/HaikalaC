@@ -187,10 +187,14 @@ int hk_run(const hk_haiku *h, const hk_options *opt)
         return 1;
     }
 
-    /* Resolve fractal palette if needed. */
+    /* Resolve fractal palette if needed. base_colors stays constant
+     * across the run; fractal_colors may be remixed per-frame when
+     * sound + fractal are both on (so the spectrum drives hue/light). */
+    hk_rgb base_colors[HK_PALETTE_STOPS];
     hk_rgb fractal_colors[HK_PALETTE_STOPS];
     if (opt->fractal) {
-        resolve_fractal_palette(h, opt, fractal_colors);
+        resolve_fractal_palette(h, opt, base_colors);
+        memcpy(fractal_colors, base_colors, sizeof(fractal_colors));
     }
 
     /* Build a render-params bundle that mirrors the options. */
@@ -303,14 +307,29 @@ int hk_run(const hk_haiku *h, const hk_options *opt)
         double cycle_period = opt->cycle_period > 1.0 ? opt->cycle_period : 1.0;
         double hue_shift = opt->cycle ? (t / cycle_period) * 360.0 : 0.0;
 
-        /* Audio reactivity: drain the sox pipe and accumulate extra
-         * hue rotation proportional to recent loudness. A full-volume
-         * second rotates ~720°·gain by default (gain=1.0). */
+        /* Audio reactivity. Two effects, both opt-in via --sound:
+         *   1) Recent loudness accumulates into hue_shift so the
+         *      whole field rotates faster when there's sound.
+         *   2) Three-band spectrum (low/mid/high) reshapes the
+         *      fractal palette: bass tints cool, treble warms,
+         *      total energy lifts brightness. */
         if (sound_active) {
             double e = hk_sound_energy() * opt->sound_gain;
             if (e < 0.0) e = 0.0;
             sound_phase += e * 720.0 * dt;
             hue_shift += sound_phase;
+
+            if (opt->fractal) {
+                double lo, md, hi;
+                if (hk_sound_spectrum(&lo, &md, &hi)) {
+                    lo *= opt->sound_gain;
+                    md *= opt->sound_gain;
+                    hi *= opt->sound_gain;
+                    if (lo > 1) lo = 1; if (md > 1) md = 1; if (hi > 1) hi = 1;
+                    hk_palette_with_spectrum(base_colors, lo, md, hi,
+                                             fractal_colors);
+                }
+            }
         }
 
         emanate.t = t;

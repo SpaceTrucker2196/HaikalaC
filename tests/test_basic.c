@@ -287,6 +287,39 @@ static void test_sound_compression_normalizes(void)
     ASSERT(e >= 0.0 && e <= 1.0);
 }
 
+static void test_palette_with_spectrum_silence_is_identity(void)
+{
+    /* All-zero spectrum input must leave the base palette nearly
+     * unchanged (up to ±1 from rounding through HLS). */
+    const hk_rgb *base = hk_palette_named(HK_PAL_AURORA);
+    hk_rgb out[HK_PALETTE_STOPS];
+    hk_palette_with_spectrum(base, 0.0, 0.0, 0.0, out);
+    for (int i = 0; i < HK_PALETTE_STOPS; ++i) {
+        ASSERT(abs((int)out[i].r - (int)base[i].r) <= 2);
+        ASSERT(abs((int)out[i].g - (int)base[i].g) <= 2);
+        ASSERT(abs((int)out[i].b - (int)base[i].b) <= 2);
+    }
+}
+
+static void test_palette_with_spectrum_hue_shift_direction(void)
+{
+    /* Bass-dominant input shifts a green-ish base toward cool;
+     * treble-dominant input shifts it toward warm. We compare the
+     * blue vs red channels of a mid-luminance stop to confirm the
+     * direction of the shift, not the exact magnitude. */
+    hk_rgb base[HK_PALETTE_STOPS];
+    for (int i = 0; i < HK_PALETTE_STOPS; ++i) {
+        base[i] = (hk_rgb){0x40, 0xa0, 0x60}; /* mid green */
+    }
+    hk_rgb cooler[HK_PALETTE_STOPS], warmer[HK_PALETTE_STOPS];
+    hk_palette_with_spectrum(base, /*lo*/1.0, /*md*/0.0, /*hi*/0.0, cooler);
+    hk_palette_with_spectrum(base, /*lo*/0.0, /*md*/0.0, /*hi*/1.0, warmer);
+    /* Bass dominant → cooler should have noticeably more blue than red. */
+    ASSERT((int)cooler[4].b - (int)cooler[4].r > 8);
+    /* Treble dominant → warmer should have more red than blue. */
+    ASSERT((int)warmer[4].r - (int)warmer[4].b > 8);
+}
+
 static void test_size_max_fits_terminal(void)
 {
     /* For a sane terminal, the resulting body must fit:
@@ -416,6 +449,8 @@ int main(void)
     test_size_max_fits_terminal();
     test_sound_module_lifecycle();
     test_sound_compression_normalizes();
+    test_palette_with_spectrum_silence_is_identity();
+    test_palette_with_spectrum_hue_shift_direction();
 
     if (failures) {
         printf("FAILED: %d failures\n", failures);

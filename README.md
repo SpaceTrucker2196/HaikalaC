@@ -132,10 +132,25 @@ alphanumeric + hyphens (≤ 16 chars) before being interpolated.
 `--sound` makes the colors react to your microphone. Audio capture is
 delegated to `sox` (raw 16-bit signed mono PCM @ 22.05 kHz over a
 non-blocking pipe). Each frame, HaikalaC drains whatever bytes are
-buffered, computes RMS amplitude, smooths it with an exponential
-moving average, and adds a hue rotation proportional to the level —
-louder = faster color rotation, with a slow ringing decay so beats
-trail visually.
+buffered and does two analyses:
+
+**Amplitude** → AGC peak-follower + soft-knee compressor + EMA →
+loudness in [0, 1]. Adds a hue-rotation term that accumulates over
+time, so louder = faster color rotation across the whole field.
+
+**Spectrum** (when combined with `--fractal`) → 512-point Hann-windowed
+radix-2 FFT, split into three bands (≤250 Hz / 250 Hz–2 kHz / ≥2 kHz),
+each smoothed with its own AGC follower. The fractal palette is then
+re-mixed each frame:
+
+  - low band → cool tint (toward blue, up to −35° hue rotation)
+  - high band → warm tint (toward red, up to +35° hue rotation)
+  - mid lifts saturation
+  - total energy lifts brightness
+
+Bass-heavy music drifts the palette cool; bright transients pull it
+warm; balanced music stays close to the user's chosen palette but
+brighter and more saturated.
 
 Install sox if missing:
 - macOS:   `brew install sox`

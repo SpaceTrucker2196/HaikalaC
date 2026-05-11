@@ -505,3 +505,61 @@ void hk_palette_from_weather(hk_season s, hk_weather_cond c,
         out[i] = apply_mod(WEATHER_SEASONS[si][i], m);
     }
 }
+
+/* ---- spectrum-modulated palette ----------------------------------- */
+
+/* Build a palette by hue-shifting + brightening a base palette
+ * according to the (low, mid, high) band energies. Low energy nudges
+ * the palette toward blue (negative hue rotation), high energy nudges
+ * it toward red (positive hue rotation). Mid lifts saturation.
+ * Overall brightness gets a small boost when any band is loud.
+ *
+ * The mapping is calibrated so:
+ *   - silence: out == base
+ *   - bass-heavy:    cooler tint, mild brightness lift
+ *   - treble-heavy:  warmer tint, mild brightness lift
+ *   - balanced loud: brighter + slightly more saturated, neutral hue
+ */
+void hk_palette_with_spectrum(const hk_rgb base[HK_PALETTE_STOPS],
+                              double low, double mid, double high,
+                              hk_rgb out[HK_PALETTE_STOPS])
+{
+    if (!base || !out) return;
+    if (low  < 0) low  = 0; if (low  > 1) low  = 1;
+    if (mid  < 0) mid  = 0; if (mid  > 1) mid  = 1;
+    if (high < 0) high = 0; if (high > 1) high = 1;
+
+    /* warm-cool axis: -1 = full bass tint, +1 = full treble tint */
+    double balance = high - low;
+    /* max rotation: 35°. Sign positive = warmer (toward red),
+     * negative = cooler (toward blue). RGB red is at hue 0, blue
+     * at hue 240°. Rotating toward red is +hue (in some
+     * conventions) — empirically pick the sign that matches. */
+    double dH = -balance * 35.0;
+    /* Total energy lifts L (lightness) up to +0.12; mid lifts S +0.20. */
+    double dL = 0.12 * fmin(1.0, (low + mid + high) / 2.0);
+    double dS = 0.20 * mid;
+
+    for (int i = 0; i < HK_PALETTE_STOPS; ++i) {
+        double h, l, s;
+        rgb_to_hls(base[i].r / 255.0, base[i].g / 255.0, base[i].b / 255.0,
+                   &h, &l, &s);
+        h = fmod(h + dH / 360.0, 1.0);
+        if (h < 0) h += 1.0;
+        l += dL;
+        if (l > 1.0) l = 1.0; if (l < 0.0) l = 0.0;
+        s += dS;
+        if (s > 1.0) s = 1.0; if (s < 0.0) s = 0.0;
+        double r, g, b;
+        hls_to_rgb(h, l, s, &r, &g, &b);
+        long ir = (long)(r * 255.0 + 0.5);
+        long ig = (long)(g * 255.0 + 0.5);
+        long ib = (long)(b * 255.0 + 0.5);
+        if (ir < 0) ir = 0; if (ir > 255) ir = 255;
+        if (ig < 0) ig = 0; if (ig > 255) ig = 255;
+        if (ib < 0) ib = 0; if (ib > 255) ib = 255;
+        out[i].r = (uint8_t)ir;
+        out[i].g = (uint8_t)ig;
+        out[i].b = (uint8_t)ib;
+    }
+}
