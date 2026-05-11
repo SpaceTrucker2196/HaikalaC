@@ -36,9 +36,80 @@
 #define SOUND_SAMPLE_RATE 22050
 #define SOUND_BUFFER      8192   /* int16 samples = 16 KB max per read */
 
-static FILE  *g_pipe = NULL;
-static int    g_fd   = -1;
-static double g_ema  = 0.0;
+/* Compression / AGC tuning. These are deliberately not exposed in the
+ * public API — the user already has `--sound-gain` for room-level
+ * adjustments, and these constants are about *shape* of the response
+ * curve, which should be stable across rooms. */
+#define AGC_ATTACK        0.15   /* how fast peak_ref chases loud peaks */
+#define AGC_RELEASE       0.002  /* how slowly peak_ref decays in silence */
+#define AGC_FLOOR         0.003  /* noise floor — below this is "silence" */
+#define AGC_MAX_NORM      1.5    /* allow brief overshoot above ref */
+#define COMPRESSOR_POWER  0.55   /* power-curve exponent; <1 = compressed */
+#define SMOOTH_ALPHA      0.35   /* EMA on the compressed value */
+#define IDLE_DECAY        0.96   /* per-frame EMA decay when no audio */
+#define PEAK_IDLE_DECAY   0.9995 /* peak_ref decay during long silence */
+
+/* Filter state — AGC peak follower + EMA. Exposed via the (file-scope)
+ * `g_filter` and the test-only `hk_sound_filter_apply` so the algorithm
+ * is unit-testable without a real audio pipe. */
+typedef struct {
+    double peak_ref;
+    double ema;
+} sound_filter_state;
+
+static FILE              *g_pipe   = NULL;
+static int                g_fd     = -1;
+static sound_filter_state g_filter = { 0.01, 0.0 };
+
+/* Apply one frame of the AGC + compressor + EMA chain.
+ *
+ *   raw_rms ──► [ AGC peak follower ] ──► raw_rms / peak_ref
+ *           ──► [ soft-knee compressor: pow(norm, 0.55) ]
+ *           ──► [ EMA smoothing ]                          ──► 0..1
+ *
+ * The AGC chases loud peaks quickly and releases very slowly, so a
+ * quiet room produces a small reference and any speech/music quickly
+ * fills the response range. A loud room raises the reference instead
+ * of clipping at 1.0. The power-curve compressor then pulls quiet
+ * values up and ceilings the loud ones — same shape a hardware audio
+ * compressor uses on a vocal mic. */
+static double filter_apply(sound_filter_state *st, double raw_rms,
+                           bool has_data)
+{
+    if (has_data) {
+        double coeff = (raw_rms > st->peak_ref) ? AGC_ATTACK : AGC_RELEASE;
+        st->peak_ref += (raw_rms - st->peak_ref) * coeff;
+        if (st->peak_ref < AGC_FLOOR) st->peak_ref = AGC_FLOOR;
+
+        double norm = raw_rms / st->peak_ref;
+        if (norm > AGC_MAX_NORM) norm = AGC_MAX_NORM;
+
+        double comp = pow(norm, COMPRESSOR_POWER);
+        if (comp > 1.0) comp = 1.0;
+        if (comp < 0.0) comp = 0.0;
+
+        st->ema = SMOOTH_ALPHA * comp + (1.0 - SMOOTH_ALPHA) * st->ema;
+    } else {
+        st->ema      *= IDLE_DECAY;
+        st->peak_ref *= PEAK_IDLE_DECAY;
+        if (st->peak_ref < AGC_FLOOR) st->peak_ref = AGC_FLOOR;
+    }
+    if (st->ema < 0.0) st->ema = 0.0;
+    if (st->ema > 1.0) st->ema = 1.0;
+    return st->ema;
+}
+
+/* Public test hook: drive the filter with a synthetic RMS, no pipe. */
+double hk_sound_filter_apply(double raw_rms, bool has_data)
+{
+    return filter_apply(&g_filter, raw_rms, has_data);
+}
+
+void hk_sound_filter_reset(void)
+{
+    g_filter.peak_ref = 0.01;
+    g_filter.ema      = 0.0;
+}
 
 bool hk_sound_open(void)
 {
@@ -58,7 +129,7 @@ bool hk_sound_open(void)
         g_fd = -1;
         return false;
     }
-    g_ema = 0.0;
+    hk_sound_filter_reset();
     return true;
 }
 
@@ -69,7 +140,7 @@ void hk_sound_close(void)
         g_pipe = NULL;
         g_fd = -1;
     }
-    g_ema = 0.0;
+    hk_sound_filter_reset();
 }
 
 double hk_sound_energy(void)
@@ -87,17 +158,9 @@ double hk_sound_energy(void)
             double s = (double)buf[i] / 32768.0;
             sumsq += s * s;
         }
-        double rms = (samples > 0) ? sqrt(sumsq / (double)samples) : 0.0;
-        /* α = 0.35 — fast enough to feel reactive, slow enough that a
-         * single transient doesn't dominate the visual.  */
-        const double alpha = 0.35;
-        g_ema = alpha * rms + (1.0 - alpha) * g_ema;
-    } else {
-        /* Slow decay when no fresh audio. Gives a nice "ringing" feel
-         * after a beat instead of cutting off abruptly. */
-        g_ema *= 0.96;
+        double raw_rms =
+            (samples > 0) ? sqrt(sumsq / (double)samples) : 0.0;
+        return filter_apply(&g_filter, raw_rms, true);
     }
-    if (g_ema < 0.0) g_ema = 0.0;
-    if (g_ema > 1.0) g_ema = 1.0;
-    return g_ema;
+    return filter_apply(&g_filter, 0.0, false);
 }

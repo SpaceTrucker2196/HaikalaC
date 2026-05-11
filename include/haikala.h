@@ -153,6 +153,11 @@ bool   hk_sound_open(void);
 void   hk_sound_close(void);
 double hk_sound_energy(void);
 
+/* Test hooks: drive the AGC + compressor + EMA chain with a synthetic
+ * raw RMS, bypassing the audio pipe. */
+double hk_sound_filter_apply(double raw_rms, bool has_data);
+void   hk_sound_filter_reset(void);
+
 /* ---------- mandala spec -------------------------------------------- */
 
 typedef enum {

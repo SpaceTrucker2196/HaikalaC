@@ -249,6 +249,44 @@ static void test_sound_module_lifecycle(void)
     ASSERT(hk_sound_energy() == 0.0);
 }
 
+static void test_sound_compression_normalizes(void)
+{
+    /* Drive the compressor with a constant raw RMS and confirm the
+     * output rises to (and stays near) a high normalized value — the
+     * point of the AGC is that any sustained level fills the range. */
+    hk_sound_filter_reset();
+    double final_loud = 0.0;
+    for (int i = 0; i < 200; ++i) {
+        final_loud = hk_sound_filter_apply(0.30, true);
+    }
+    ASSERT(final_loud > 0.85);
+
+    /* A 100× quieter constant raw RMS — after the AGC catches up,
+     * the normalized energy should also reach a high value. That's
+     * the compressor's job: equalize quiet and loud across rooms. */
+    hk_sound_filter_reset();
+    double final_quiet = 0.0;
+    for (int i = 0; i < 2000; ++i) {
+        final_quiet = hk_sound_filter_apply(0.003, true);
+    }
+    ASSERT(final_quiet > 0.65);
+
+    /* Silence (no data) decays the EMA toward 0 within a few seconds. */
+    hk_sound_filter_reset();
+    /* prime with some loud audio */
+    for (int i = 0; i < 50; ++i) hk_sound_filter_apply(0.40, true);
+    double after_silence = 0.0;
+    for (int i = 0; i < 200; ++i) {
+        after_silence = hk_sound_filter_apply(0.0, false);
+    }
+    ASSERT(after_silence < 0.05);
+
+    /* Output is always clipped to [0, 1]. */
+    hk_sound_filter_reset();
+    double e = hk_sound_filter_apply(10.0, true);
+    ASSERT(e >= 0.0 && e <= 1.0);
+}
+
 static void test_size_max_fits_terminal(void)
 {
     /* For a sane terminal, the resulting body must fit:
@@ -377,6 +415,7 @@ int main(void)
     test_no_emoji_bg_does_not_bleed_across_empty_cells();
     test_size_max_fits_terminal();
     test_sound_module_lifecycle();
+    test_sound_compression_normalizes();
 
     if (failures) {
         printf("FAILED: %d failures\n", failures);
