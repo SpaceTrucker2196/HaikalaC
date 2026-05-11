@@ -375,17 +375,16 @@ int hk_run(const hk_haiku *h, const hk_options *opt)
         ? hk_grid_new(radius) : NULL;
 
     /* Life automaton: allocate engine sized to the mandala body and
-     * seed it from an initial render. The reseed loop below revives
-     * the simulation whenever the population dies out. */
+     * seed it with a 33% random pattern across the whole disc. This
+     * gives Conway substrate everywhere rather than only at the
+     * sparse ring positions — so life evolves throughout the
+     * mandala, not just clustered near the center. */
     hk_life *life = NULL;
+    uint32_t life_seed = (uint32_t)((uintptr_t)h ^ 0xC0FFEE);
     if (opt->life) {
         life = hk_life_new(mandala->width, mandala->height, spec.grid_radius);
         if (life) {
-            /* Initial render to seed alive-state. */
-            hk_render_params rp_seed = rp;
-            rp_seed.rings_only = true;
-            hk_render_spec(&spec, &rp_seed, mandala);
-            hk_life_seed_from_grid(life, mandala);
+            hk_life_seed_random(life, 0.33, life_seed);
         }
     }
     /* Palette used to colorize alive cells: borrow the resolved
@@ -443,21 +442,16 @@ int hk_run(const hk_haiku *h, const hk_options *opt)
                       opt->trails ? &trails_state : NULL,
                       life, life_palette);
 
-        /* Reseed life when the population collapses, using the most
-         * recent full mandala_grid (which still has the ring glyphs).
-         * Triggered when alive falls below 5% of the initial seed. */
+        /* Reseed life when the population collapses below 5% of the
+         * initial — reuses the random disc-fill so cells keep
+         * appearing across the whole mandala, varying the seed each
+         * cycle so the pattern doesn't repeat exactly. */
         if (life) {
             int alive = hk_life_alive_count(life);
             int seed  = hk_life_initial_count(life);
             if (alive == 0 || (seed > 0 && alive * 20 < seed)) {
-                hk_render_params rp_seed = rp;
-                rp_seed.rings_only = true;
-                hk_grid *fresh = hk_grid_new(radius);
-                if (fresh) {
-                    hk_render_spec(&spec, &rp_seed, fresh);
-                    hk_life_seed_from_grid(life, fresh);
-                    hk_grid_free(fresh);
-                }
+                life_seed = life_seed * 1664525u + 1013904223u;
+                hk_life_seed_random(life, 0.33, life_seed);
             }
         }
         hk_term_home();

@@ -175,7 +175,8 @@ the oldest.
 ### Life mode
 
 `-L` / `--life` runs a Conway-style cellular automaton overlay seeded
-from the ring positions. Each frame applies one B3/S23 step (born
+with a 33% random density across the whole mandala disc. Each frame
+applies one B3/S23 step (born
 with exactly 3 neighbors, survive with 2 or 3) restricted to cells
 inside the mandala disc. Survivors age frame-by-frame; the renderer
 uses age to pick from a glyph repertoire (`● ◉ ◯ ○ ◌ · ˙`) and to

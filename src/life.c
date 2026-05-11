@@ -93,6 +93,35 @@ void hk_life_seed_from_grid(hk_life *L, const hk_grid *src)
     L->initial_alive = alive;
 }
 
+void hk_life_seed_random(hk_life *L, double density, uint32_t seed)
+{
+    if (!L) return;
+    if (density < 0.0) density = 0.0;
+    if (density > 1.0) density = 1.0;
+    int total = L->width * L->height;
+    int alive = 0;
+    /* Deterministic per-cell hash so the same (seed, density, position)
+     * always produces the same pattern. */
+    for (int i = 0; i < total; ++i) {
+        if (!L->in_disc[i]) {
+            L->cells[i] = 0;
+            continue;
+        }
+        uint32_t h = seed ^ ((uint32_t)i * 2654435761u);
+        h = (h ^ (h >> 16)) * 0x85ebca6bu;
+        h = (h ^ (h >> 13)) * 0xc2b2ae35u;
+        h =  h ^ (h >> 16);
+        double r = (h & 0xFFFFFFu) / (double)0xFFFFFFu;
+        if (r < density) {
+            L->cells[i] = 1;
+            ++alive;
+        } else {
+            L->cells[i] = 0;
+        }
+    }
+    L->initial_alive = alive;
+}
+
 int hk_life_kill_at_grid(hk_life *L, const hk_grid *src)
 {
     if (!L || !src) return 0;

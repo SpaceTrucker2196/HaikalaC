@@ -366,6 +366,24 @@ static void test_life_engine_evolves(void)
     hk_life_free(L);
 }
 
+static void test_life_seed_random_covers_disc(void)
+{
+    /* Random seed must produce alive cells distributed across the
+     * disc — not just clumped near the center. Split the disc into
+     * inner / middle / outer rings by radius and confirm each gets
+     * at least some live cells. */
+    hk_life *L = hk_life_new(45, 23, HK_SIZE_MEDIUM);  /* same dims as medium */
+    ASSERT(L != NULL);
+    hk_life_seed_random(L, 0.33, 12345u);
+    int alive = hk_life_alive_count(L);
+    /* For radius=11 in our grid units (x is stretched 2× to compensate
+     * for terminal aspect), the disc covers about 760 cells; 33%
+     * density → ~250 alive. Allow wide bounds. */
+    ASSERT(alive > 100);
+    ASSERT(alive < 400);
+    hk_life_free(L);
+}
+
 static void test_life_kill_at_grid_collision(void)
 {
     /* Build a life grid with a known alive cell at (5,5). Build a
@@ -530,6 +548,7 @@ int main(void)
     test_palette_with_spectrum_hue_shift_direction();
     test_life_engine_evolves();
     test_life_kill_at_grid_collision();
+    test_life_seed_random_covers_disc();
 
     if (failures) {
         printf("FAILED: %d failures\n", failures);

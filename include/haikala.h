@@ -293,6 +293,12 @@ void     hk_life_free(hk_life *life);
  * inside the disc becomes a freshly-born cell. Existing state is cleared. */
 void hk_life_seed_from_grid(hk_life *life, const hk_grid *src);
 
+/* Seed alive-state with a deterministic random pattern across the
+ * whole disc at the given density (0..1). 0.33 is the Conway sweet
+ * spot — enough clusters for interesting evolution, not so packed
+ * that everything dies to overcrowding on the first tick. */
+void hk_life_seed_random(hk_life *life, double density, uint32_t seed);
+
 /* Kill alive cells wherever `src` has a non-empty, non-covered glyph.
  * Used to make moving ring/ripple elements "sweep through" the life
  * pattern and clear cells they collide with. Returns kill count. */
