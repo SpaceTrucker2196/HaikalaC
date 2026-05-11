@@ -93,6 +93,24 @@ void hk_life_seed_from_grid(hk_life *L, const hk_grid *src)
     L->initial_alive = alive;
 }
 
+int hk_life_kill_at_grid(hk_life *L, const hk_grid *src)
+{
+    if (!L || !src) return 0;
+    if (src->width != L->width || src->height != L->height) return 0;
+    int killed = 0;
+    int total = L->width * L->height;
+    for (int i = 0; i < total; ++i) {
+        if (L->cells[i] == 0) continue;
+        const hk_cell *c = &src->cells[i];
+        if (c->covered) continue;
+        if (c->glyph[0] == '\0') continue;
+        if (c->glyph[0] == ' ' && c->glyph[1] == '\0') continue;
+        L->cells[i] = 0;
+        ++killed;
+    }
+    return killed;
+}
+
 int hk_life_tick(hk_life *L)
 {
     if (!L) return 0;

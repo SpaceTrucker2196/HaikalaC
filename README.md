@@ -182,6 +182,14 @@ uses age to pick from a glyph repertoire (`● ◉ ◯ ○ ◌ · ˙`) and to
 index into the fractal palette so newborns are bright and oldsters
 fade toward dim dots.
 
+**Collisions reset cells.** Moving mandala elements (ring rotations
+from `-S`, expanding ripples from `-R`, breath-driven displacements)
+sweep through the life pattern and kill any alive cells they touch.
+Each frame the rings-only layer is computed; wherever it has a non-
+empty glyph, the life cell at that position dies before the next
+tick. The visual: living patterns get carved out by the breathing
+mandala, then re-grow in the gaps.
+
 When the population dies out (alive < 5% of the initial seed), the
 engine reseeds from the current ring layer — the simulation feels
 like one organic cycle of birth/death rolling through the mandala

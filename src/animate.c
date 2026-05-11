@@ -130,7 +130,6 @@ static void sleep_for(double seconds)
 typedef struct {
     hk_grid **history;   /* array of n_trails grids, each spec-sized */
     int       n_trails;
-    hk_grid  *ring_layer; /* scratch for current frame's rings-only render */
 } trail_ctx;
 
 static size_t compose_frame(char *buf, size_t bufsize,
@@ -139,6 +138,7 @@ static size_t compose_frame(char *buf, size_t bufsize,
                             const hk_haiku *haiku,
                             hk_grid *mandala_grid,
                             hk_grid *canvas,
+                            hk_grid *ring_layer,    /* NULL when not needed */
                             const hk_render_params *rp,
                             double hue_shift,
                             const hk_emanate *emanate,
@@ -160,7 +160,28 @@ static size_t compose_frame(char *buf, size_t bufsize,
     hk_stamp_text_line(canvas, author_line, header_top + 4,
                        HK_STYLE_DIM | HK_STYLE_ITALIC);
 
-    /* Render mandala body (full — with fractal or bg fill). */
+    /* Render the rings-only layer ONCE if any consumer (life or
+     * trails) needs it. Cheaper than rendering twice. */
+    if (ring_layer && (life || (trails && trails->n_trails > 0))) {
+        hk_render_params rings = *rp;
+        rings.rings_only = true;
+        hk_render_spec(spec, &rings, ring_layer);
+    }
+
+    /* Life collision: kill alive cells wherever a ring/center/ripple
+     * glyph is placed this frame. The user sees moving ring elements
+     * sweep through the life pattern and clear it; the engine
+     * reseeds itself when the population collapses. */
+    if (life && ring_layer) {
+        hk_life_kill_at_grid(life, ring_layer);
+    }
+    /* Life tick happens AFTER kill so this frame's renderable state
+     * reflects the collisions immediately. */
+    if (life) {
+        hk_life_tick(life);
+    }
+
+    /* Render the full mandala body (with fractal or bg fill). */
     hk_render_spec(spec, rp, mandala_grid);
 
     int header_block = header_top + 3 + 3;
@@ -177,29 +198,24 @@ static size_t compose_frame(char *buf, size_t bufsize,
 
     /* Trails: stamp dimmed historical ring layers on top of current
      * mandala. Each older entry stamps progressively darker. */
-    if (trails && trails->n_trails > 0) {
+    if (trails && trails->n_trails > 0 && ring_layer) {
         for (int i = 0; i < trails->n_trails; ++i) {
             double dim = pow(0.55, (double)(i + 1));
             hk_stamp_grid_dimmed(canvas, trails->history[i], top, left, dim);
         }
-        /* Render current ring-only layer for next frame's trail. */
-        hk_render_params rings = *rp;
-        rings.rings_only = true;
-        hk_render_spec(spec, &rings, trails->ring_layer);
-        /* Cycle: shift history right, copy current into [0]. */
+        /* Cycle: shift history right, copy current ring_layer into [0]. */
         hk_grid *recycled = trails->history[trails->n_trails - 1];
         for (int i = trails->n_trails - 1; i > 0; --i) {
             trails->history[i] = trails->history[i - 1];
         }
         trails->history[0] = recycled;
-        memcpy(trails->history[0]->cells, trails->ring_layer->cells,
-               (size_t)trails->ring_layer->width *
-               (size_t)trails->ring_layer->height * sizeof(hk_cell));
+        memcpy(trails->history[0]->cells, ring_layer->cells,
+               (size_t)ring_layer->width *
+               (size_t)ring_layer->height * sizeof(hk_cell));
     }
 
-    /* Life automaton: tick one generation, stamp alive cells on top. */
+    /* Stamp alive life cells on top of the current frame. */
     if (life && life_palette) {
-        hk_life_tick(life);
         hk_life_stamp(life, canvas, top, left, life_palette);
     }
 
@@ -338,13 +354,11 @@ int hk_run(const hk_haiku *h, const hk_options *opt)
         }
     }
 
-    /* Trails: allocate `trail_length` ring-layer snapshots + one
-     * scratch grid for the current ring-only render. */
+    /* Trails: allocate `trail_length` ring-layer snapshots. */
     #define HK_MAX_TRAILS 8
     int n_trails = 0;
     hk_grid *trail_grids[HK_MAX_TRAILS];
-    hk_grid *trail_scratch = NULL;
-    trail_ctx trails_state = { NULL, 0, NULL };
+    trail_ctx trails_state = { NULL, 0 };
     if (opt->trails) {
         n_trails = opt->trail_length;
         if (n_trails < 1) n_trails = 1;
@@ -352,11 +366,13 @@ int hk_run(const hk_haiku *h, const hk_options *opt)
         for (int i = 0; i < n_trails; ++i) {
             trail_grids[i] = hk_grid_new(radius);
         }
-        trail_scratch = hk_grid_new(radius);
         trails_state.history = trail_grids;
         trails_state.n_trails = n_trails;
-        trails_state.ring_layer = trail_scratch;
     }
+    /* Shared rings-only scratch grid used by both life-collision and
+     * the trail history. Allocated once when either consumer needs it. */
+    hk_grid *ring_layer = (opt->trails || opt->life)
+        ? hk_grid_new(radius) : NULL;
 
     /* Life automaton: allocate engine sized to the mandala body and
      * seed it from an initial render. The reseed loop below revives
@@ -421,6 +437,7 @@ int hk_run(const hk_haiku *h, const hk_options *opt)
 
         emanate.t = t;
         compose_frame(buf, bufsize, backdrop, &spec, h, mandala, canvas,
+                      ring_layer,
                       &rp, hue_shift,
                       opt->emanate ? &emanate : NULL,
                       opt->trails ? &trails_state : NULL,
@@ -456,7 +473,7 @@ int hk_run(const hk_haiku *h, const hk_options *opt)
     hk_grid_free(mandala);
     hk_grid_free(canvas);
     for (int i = 0; i < n_trails; ++i) hk_grid_free(trail_grids[i]);
-    if (trail_scratch) hk_grid_free(trail_scratch);
+    if (ring_layer) hk_grid_free(ring_layer);
     if (life) hk_life_free(life);
 
     hk_term_show_cursor();

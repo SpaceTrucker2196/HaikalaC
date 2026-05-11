@@ -366,6 +366,37 @@ static void test_life_engine_evolves(void)
     hk_life_free(L);
 }
 
+static void test_life_kill_at_grid_collision(void)
+{
+    /* Build a life grid with a known alive cell at (5,5). Build a
+     * ring grid with a non-empty glyph at (5,5). Kill, then confirm
+     * the life cell is dead. */
+    const hk_haiku *h = hk_haiku_get("old_pond");
+    hk_spec spec;
+    ASSERT(hk_haiku_to_spec(h, 8, HK_SIZE_MEDIUM, false, &spec));
+    hk_grid *src = hk_grid_new(HK_SIZE_MEDIUM);
+    ASSERT(src != NULL);
+    hk_life *L = hk_life_new(src->width, src->height, HK_SIZE_MEDIUM);
+    ASSERT(L != NULL);
+    /* Seed life: every disc cell alive (force population). */
+    hk_render_params rp;
+    hk_render_params_default(&rp);
+    rp.rings_only = true;
+    hk_render_spec(&spec, &rp, src);
+    hk_life_seed_from_grid(L, src);
+    int seeded = hk_life_alive_count(L);
+    ASSERT(seeded > 0);
+
+    /* Build a "ring overlay" grid with a glyph at every position of
+     * the original seed. Kill — should clear ALL seeded life. */
+    int killed = hk_life_kill_at_grid(L, src);
+    ASSERT(killed == seeded);
+    ASSERT(hk_life_alive_count(L) == 0);
+
+    hk_grid_free(src);
+    hk_life_free(L);
+}
+
 static void test_size_max_fits_terminal(void)
 {
     /* For a sane terminal, the resulting body must fit:
@@ -498,6 +529,7 @@ int main(void)
     test_palette_with_spectrum_silence_is_identity();
     test_palette_with_spectrum_hue_shift_direction();
     test_life_engine_evolves();
+    test_life_kill_at_grid_collision();
 
     if (failures) {
         printf("FAILED: %d failures\n", failures);

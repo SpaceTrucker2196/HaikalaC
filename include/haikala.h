@@ -293,6 +293,11 @@ void     hk_life_free(hk_life *life);
  * inside the disc becomes a freshly-born cell. Existing state is cleared. */
 void hk_life_seed_from_grid(hk_life *life, const hk_grid *src);
 
+/* Kill alive cells wherever `src` has a non-empty, non-covered glyph.
+ * Used to make moving ring/ripple elements "sweep through" the life
+ * pattern and clear cells they collide with. Returns kill count. */
+int  hk_life_kill_at_grid(hk_life *life, const hk_grid *src);
+
 /* Advance one Conway generation (B3/S23). Ages survivors so the stamp
  * can dim older cells. Returns the new alive count. */
 int  hk_life_tick(hk_life *life);
